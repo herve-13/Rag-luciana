@@ -1,12 +1,36 @@
-# Alembic
+# Python cache/bytecode
+__pycache__/
 *.pyc
-__pycache__
+*.pyo
+*.pyd
 
-# Env
+# Local env/secrets
 .env
+.env.*
+!.env.example
+
+# Virtual environments
 .venv/
 venv/
 venv_wsl/
+
+# Test/build artifacts
+.pytest_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Runtime logs/files
+*.log
+logs/
+
+# Local heavy binaries (use release artifacts, not Git)
+bin/qdrant
+bin/qdrant.tar.gz
 
 # IDE
 .vscode/
@@ -15,5 +39,3 @@ venv_wsl/
 # OS
 Thumbs.db
 .DS_Store
-
-*.log
