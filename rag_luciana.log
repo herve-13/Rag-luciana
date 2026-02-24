@@ -1,0 +1,5 @@
+INFO:     Started server process [9179]
+INFO:     Waiting for application startup.
+{"event": "startup_complete", "logger": "rag_luciana.api.main", "level": "info", "timestamp": "2026-02-24T08:02:29.703466Z"}
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8002 (Press CTRL+C to quit)

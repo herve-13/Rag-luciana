@@ -1,0 +1,17 @@
+# Alembic
+*.pyc
+__pycache__
+
+# Env
+.env
+.venv/
+venv/
+venv_wsl/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
