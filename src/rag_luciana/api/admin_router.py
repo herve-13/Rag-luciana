@@ -28,6 +28,11 @@ from rag_luciana.api.schemas import (
     UserAgentRelationListResponse,
     UserAgentRelationResponse,
     UserAgentRelationUpsert,
+    MediaAssetListResponse,
+    MediaAssetResponse,
+    MediaAssetUpsertRequest,
+    MediaPickRequest,
+    MediaPickResponse,
 )
 from rag_luciana.clients.qdrant_client import delete_by_filter
 from rag_luciana.db import repo
@@ -502,4 +507,63 @@ async def purge_conversation(conversation_id: str, db: DbSession):
             conversation_id=conversation_id,
             exc_info=True,
         )
+
+
+@router.get("/media/assets", response_model=MediaAssetListResponse)
+async def list_media_assets(
+    db: DbSession,
+    character_id: str = Query(..., min_length=1),
+    active_only: bool = Query(True),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    items, total = await repo.list_media_assets(
+        db,
+        character_id=character_id,
+        active_only=active_only,
+        limit=limit,
+        offset=offset,
+    )
+    return MediaAssetListResponse(items=items, total=total, limit=limit, offset=offset)
+
+
+@router.post(
+    "/media/assets",
+    response_model=MediaAssetResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upsert_media_asset(body: MediaAssetUpsertRequest, db: DbSession):
+    obj = await repo.upsert_media_asset(
+        db,
+        character_id=body.character_id,
+        file_url=body.file_url,
+        description=body.description,
+        required_relationship_level=body.required_relationship_level,
+        content_intensity=body.content_intensity,
+        is_active=body.is_active,
+    )
+    return MediaAssetResponse(**obj)
+
+
+@router.post("/media/pick", response_model=MediaPickResponse)
+async def pick_media_asset(body: MediaPickRequest, db: DbSession):
+    item, source = await repo.pick_media_asset_for_user(
+        db,
+        user_id=body.user_id,
+        character_id=body.character_id,
+        allow_recycle=body.allow_recycle,
+        max_relationship_level=body.max_relationship_level,
+        max_content_intensity=body.max_content_intensity,
+    )
+    if item is None:
+        return MediaPickResponse(item=None, source=None)
+    return MediaPickResponse(item=MediaAssetResponse(**item), source=source)
+
+
+@router.delete("/media/assets/{asset_id}", response_model=MediaAssetResponse)
+async def delete_media_asset(asset_id: int, db: DbSession):
+    obj = await repo.delete_media_asset(db, asset_id=asset_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="Media asset not found.")
+    return MediaAssetResponse(**obj)
 

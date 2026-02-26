@@ -317,3 +317,44 @@ class ReadyResponse(BaseModel):
     status: str  # "ready" | "not_ready"
     checks: dict[str, bool]  # {"mariadb": true, "qdrant": true, "ollama": true}
 
+
+class MediaAssetResponse(BaseModel):
+    id: int
+    character_id: str
+    file_url: str
+    description: str | None = None
+    required_relationship_level: int = 1
+    content_intensity: str = "SOFT"
+    is_active: bool
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class MediaAssetListResponse(PaginatedResponse):
+    items: list[MediaAssetResponse]
+
+
+class MediaAssetUpsertRequest(BaseModel):
+    character_id: str = Field(..., min_length=1, max_length=64)
+    file_url: str = Field(..., min_length=1, max_length=255)
+    description: str | None = None
+    required_relationship_level: int = Field(1, ge=1, le=5)
+    content_intensity: str = Field("SOFT", pattern=r"^(SOFT|SENSUAL|ADULT|EXPLICIT)$")
+    is_active: bool = True
+
+
+class MediaPickRequest(BaseModel):
+    user_id: str = Field(..., min_length=1, max_length=64)
+    character_id: str = Field(..., min_length=1, max_length=64)
+    allow_recycle: bool = True
+    max_relationship_level: int = Field(5, ge=1, le=5)
+    max_content_intensity: str = Field(
+        "EXPLICIT",
+        pattern=r"^(SOFT|SENSUAL|ADULT|EXPLICIT)$",
+    )
+
+
+class MediaPickResponse(BaseModel):
+    item: MediaAssetResponse | None = None
+    source: str | None = None  # unseen | recycled | null
+

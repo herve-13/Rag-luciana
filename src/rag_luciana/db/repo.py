@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Sequence
 
-from sqlalchemy import delete, select, func as sa_func
+from sqlalchemy import delete, select, func as sa_func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from rag_luciana.db.models import (
@@ -21,6 +21,68 @@ from rag_luciana.db.models import (
     UserGiftHistory,
     UserWallet,
 )
+
+MEDIA_ASSETS_DDL = """
+CREATE TABLE IF NOT EXISTS media_assets (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  character_id VARCHAR(64) NOT NULL,
+  file_url VARCHAR(255) NOT NULL,
+  description TEXT NULL,
+  required_relationship_level TINYINT UNSIGNED NOT NULL DEFAULT 1,
+  content_intensity VARCHAR(16) NOT NULL DEFAULT 'SOFT',
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_media_character_file (character_id, file_url),
+  KEY idx_media_character_active (character_id, is_active, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+"""
+
+MEDIA_DELIVERY_HISTORY_DDL = """
+CREATE TABLE IF NOT EXISTS media_delivery_history (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  user_id VARCHAR(64) NOT NULL,
+  character_id VARCHAR(64) NOT NULL,
+  media_asset_id BIGINT NOT NULL,
+  delivered_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_mdh_user_char_time (user_id, character_id, delivered_at),
+  KEY idx_mdh_asset (media_asset_id),
+  KEY idx_mdh_user_char_asset (user_id, character_id, media_asset_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+"""
+
+
+async def _ensure_media_assets_table(db: AsyncSession) -> None:
+    await db.execute(text(MEDIA_ASSETS_DDL))
+    # Backward-compatible column migration for existing installations.
+    try:
+        await db.execute(
+            text(
+                """
+                ALTER TABLE media_assets
+                ADD COLUMN required_relationship_level TINYINT UNSIGNED NOT NULL DEFAULT 1
+                """
+            )
+        )
+    except Exception:
+        pass
+    try:
+        await db.execute(
+            text(
+                """
+                ALTER TABLE media_assets
+                ADD COLUMN content_intensity VARCHAR(16) NOT NULL DEFAULT 'SOFT'
+                """
+            )
+        )
+    except Exception:
+        pass
+
+
+async def _ensure_media_delivery_history_table(db: AsyncSession) -> None:
+    await db.execute(text(MEDIA_DELIVERY_HISTORY_DDL))
 
 
 # ─────────────────────────────────────────────────────────
@@ -813,3 +875,264 @@ async def list_gift_history(
         stmt = stmt.where(UserGiftHistory.character_id == character_id)
     stmt = stmt.order_by(UserGiftHistory.purchased_at.desc()).limit(limit)
     return (await db.execute(stmt)).scalars().all()
+
+
+async def list_media_assets(
+    db: AsyncSession,
+    *,
+    character_id: str,
+    active_only: bool = True,
+    limit: int = 100,
+    offset: int = 0,
+) -> tuple[list[dict], int]:
+    """List media assets from MariaDB table media_assets."""
+    await _ensure_media_assets_table(db)
+    where = "WHERE character_id = :character_id"
+    if active_only:
+        where += " AND is_active = 1"
+
+    count_sql = text(f"SELECT COUNT(*) AS total FROM media_assets {where}")
+    total = int(
+        (await db.execute(count_sql, {"character_id": character_id})).scalar() or 0
+    )
+
+    list_sql = text(
+        f"""
+        SELECT id, character_id, file_url, description, required_relationship_level, content_intensity, is_active, created_at, updated_at
+        FROM media_assets
+        {where}
+        ORDER BY id DESC
+        LIMIT :limit OFFSET :offset
+        """
+    )
+    rows = (
+        await db.execute(
+            list_sql,
+            {
+                "character_id": character_id,
+                "limit": int(limit),
+                "offset": int(offset),
+            },
+        )
+    ).mappings().all()
+    return [dict(r) for r in rows], total
+
+
+async def upsert_media_asset(
+    db: AsyncSession,
+    *,
+    character_id: str,
+    file_url: str,
+    description: str | None = None,
+    required_relationship_level: int = 1,
+    content_intensity: str = "SOFT",
+    is_active: bool = True,
+) -> dict:
+    await _ensure_media_assets_table(db)
+    normalized_intensity = (content_intensity or "SOFT").strip().upper()
+    if normalized_intensity not in {"SOFT", "SENSUAL", "ADULT", "EXPLICIT"}:
+        normalized_intensity = "SOFT"
+    level = max(1, min(5, int(required_relationship_level or 1)))
+
+    upsert_sql = text(
+        """
+        INSERT INTO media_assets (
+          character_id, file_url, description, required_relationship_level, content_intensity, is_active
+        )
+        VALUES (
+          :character_id, :file_url, :description, :required_relationship_level, :content_intensity, :is_active
+        )
+        ON DUPLICATE KEY UPDATE
+          description = VALUES(description),
+          required_relationship_level = VALUES(required_relationship_level),
+          content_intensity = VALUES(content_intensity),
+          is_active = VALUES(is_active),
+          updated_at = CURRENT_TIMESTAMP
+        """
+    )
+    await db.execute(
+        upsert_sql,
+        {
+            "character_id": character_id,
+            "file_url": file_url,
+            "description": description,
+            "required_relationship_level": level,
+            "content_intensity": normalized_intensity,
+            "is_active": 1 if is_active else 0,
+        },
+    )
+
+    get_sql = text(
+        """
+        SELECT id, character_id, file_url, description, required_relationship_level, content_intensity, is_active, created_at, updated_at
+        FROM media_assets
+        WHERE character_id = :character_id AND file_url = :file_url
+        LIMIT 1
+        """
+    )
+    row = (
+        await db.execute(
+            get_sql,
+            {"character_id": character_id, "file_url": file_url},
+        )
+    ).mappings().first()
+    return dict(row) if row else {}
+
+
+async def delete_media_asset(
+    db: AsyncSession,
+    *,
+    asset_id: int,
+) -> dict | None:
+    await _ensure_media_assets_table(db)
+
+    get_sql = text(
+        """
+        SELECT id, character_id, file_url, description, required_relationship_level, content_intensity, is_active, created_at, updated_at
+        FROM media_assets
+        WHERE id = :asset_id
+        LIMIT 1
+        """
+    )
+    row = (
+        await db.execute(
+            get_sql,
+            {"asset_id": int(asset_id)},
+        )
+    ).mappings().first()
+    if not row:
+        return None
+
+    await _ensure_media_delivery_history_table(db)
+    await db.execute(
+        text("DELETE FROM media_delivery_history WHERE media_asset_id = :asset_id"),
+        {"asset_id": int(asset_id)},
+    )
+    delete_sql = text("DELETE FROM media_assets WHERE id = :asset_id")
+    await db.execute(delete_sql, {"asset_id": int(asset_id)})
+    return dict(row)
+
+
+async def pick_media_asset_for_user(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    character_id: str,
+    allow_recycle: bool = True,
+    max_relationship_level: int = 5,
+    max_content_intensity: str = "EXPLICIT",
+) -> tuple[dict | None, str | None]:
+    """
+    Pick media for a user, preferring unseen assets.
+
+    Returns:
+      (asset, source) where source is "unseen" or "recycled", or (None, None).
+    """
+    await _ensure_media_assets_table(db)
+    await _ensure_media_delivery_history_table(db)
+    max_level = max(1, min(5, int(max_relationship_level or 5)))
+    max_intensity = (max_content_intensity or "EXPLICIT").strip().upper()
+    if max_intensity not in {"SOFT", "SENSUAL", "ADULT", "EXPLICIT"}:
+        max_intensity = "EXPLICIT"
+
+    intensity_rank_sql = """
+      CASE m.content_intensity
+        WHEN 'SOFT' THEN 1
+        WHEN 'SENSUAL' THEN 2
+        WHEN 'ADULT' THEN 3
+        WHEN 'EXPLICIT' THEN 4
+        ELSE 1
+      END
+    """
+    max_intensity_rank_sql = """
+      CASE :max_content_intensity
+        WHEN 'SOFT' THEN 1
+        WHEN 'SENSUAL' THEN 2
+        WHEN 'ADULT' THEN 3
+        WHEN 'EXPLICIT' THEN 4
+        ELSE 4
+      END
+    """
+
+    unseen_sql = text(
+        f"""
+        SELECT m.id, m.character_id, m.file_url, m.description, m.required_relationship_level, m.content_intensity, m.is_active, m.created_at, m.updated_at
+        FROM media_assets m
+        WHERE m.character_id = :character_id
+          AND m.is_active = 1
+          AND m.required_relationship_level <= :max_relationship_level
+          AND ({intensity_rank_sql}) <= ({max_intensity_rank_sql})
+          AND NOT EXISTS (
+            SELECT 1
+            FROM media_delivery_history h
+            WHERE h.media_asset_id = m.id
+              AND h.user_id = :user_id
+              AND h.character_id = :character_id
+          )
+        ORDER BY RAND()
+        LIMIT 1
+        """
+    )
+    row = (
+        await db.execute(
+            unseen_sql,
+            {
+                "user_id": user_id,
+                "character_id": character_id,
+                "max_relationship_level": max_level,
+                "max_content_intensity": max_intensity,
+            },
+        )
+    ).mappings().first()
+
+    source: str | None = None
+    if row:
+        source = "unseen"
+    elif allow_recycle:
+        recycled_sql = text(
+            f"""
+            SELECT m.id, m.character_id, m.file_url, m.description, m.required_relationship_level, m.content_intensity, m.is_active, m.created_at, m.updated_at
+            FROM media_assets m
+            JOIN media_delivery_history h
+              ON h.media_asset_id = m.id
+             AND h.user_id = :user_id
+             AND h.character_id = :character_id
+            WHERE m.character_id = :character_id
+              AND m.is_active = 1
+              AND m.required_relationship_level <= :max_relationship_level
+              AND ({intensity_rank_sql}) <= ({max_intensity_rank_sql})
+            ORDER BY h.delivered_at ASC
+            LIMIT 1
+            """
+        )
+        row = (
+            await db.execute(
+                recycled_sql,
+                {
+                    "user_id": user_id,
+                    "character_id": character_id,
+                    "max_relationship_level": max_level,
+                    "max_content_intensity": max_intensity,
+                },
+            )
+        ).mappings().first()
+        if row:
+            source = "recycled"
+
+    if not row:
+        return None, None
+
+    await db.execute(
+        text(
+            """
+            INSERT INTO media_delivery_history (user_id, character_id, media_asset_id)
+            VALUES (:user_id, :character_id, :media_asset_id)
+            """
+        ),
+        {
+            "user_id": user_id,
+            "character_id": character_id,
+            "media_asset_id": int(row["id"]),
+        },
+    )
+    return dict(row), source
