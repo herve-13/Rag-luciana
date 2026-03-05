@@ -33,6 +33,8 @@ from rag_luciana.api.schemas import (
     MediaAssetUpsertRequest,
     MediaPickRequest,
     MediaPickResponse,
+    VectorDeleteRequest,
+    VectorDeleteResponse,
 )
 from rag_luciana.clients.qdrant_client import delete_by_filter
 from rag_luciana.db import repo
@@ -566,4 +568,37 @@ async def delete_media_asset(asset_id: int, db: DbSession):
     if obj is None:
         raise HTTPException(status_code=404, detail="Media asset not found.")
     return MediaAssetResponse(**obj)
+
+
+@router.post("/vectors/delete", response_model=VectorDeleteResponse)
+async def delete_vectors(body: VectorDeleteRequest):
+    if not isinstance(body.filters, dict) or not body.filters:
+        raise HTTPException(status_code=400, detail="filters must be a non-empty object.")
+    try:
+        delete_by_filter(
+            character_id=body.character_id,
+            scope=body.scope,
+            filters=body.filters,
+        )
+        logger.info(
+            "vectors_deleted_by_filter",
+            character_id=body.character_id,
+            scope=body.scope,
+            filters=body.filters,
+        )
+        return VectorDeleteResponse(
+            status="ok",
+            character_id=body.character_id,
+            scope=body.scope,
+            filters=body.filters,
+        )
+    except Exception:
+        logger.error(
+            "vector_delete_by_filter_failed",
+            character_id=body.character_id,
+            scope=body.scope,
+            filters=body.filters,
+            exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail="vector deletion failed")
 

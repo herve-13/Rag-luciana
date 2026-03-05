@@ -358,3 +358,16 @@ class MediaPickResponse(BaseModel):
     item: MediaAssetResponse | None = None
     source: str | None = None  # unseen | recycled | null
 
+
+class VectorDeleteRequest(BaseModel):
+    character_id: str = Field(..., min_length=1, max_length=64)
+    scope: str = Field("private", pattern=r"^(global|private)$")
+    filters: dict[str, Any] = Field(default_factory=dict)
+
+
+class VectorDeleteResponse(BaseModel):
+    status: str
+    character_id: str
+    scope: str
+    filters: dict[str, Any] = Field(default_factory=dict)
+
