@@ -26,6 +26,8 @@ dist/
 
 # Runtime logs/files
 *.log
+*.out
+*.err
 logs/
 
 # Local heavy binaries (use release artifacts, not Git)
@@ -39,3 +41,6 @@ bin/qdrant.tar.gz
 # OS
 Thumbs.db
 .DS_Store
+
+# Temporary files
+tmp/

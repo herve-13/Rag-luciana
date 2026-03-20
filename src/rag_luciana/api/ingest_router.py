@@ -19,6 +19,11 @@ router = APIRouter(tags=["ingest"], dependencies=[AdminAuth])
 
 @router.post("/ingest", response_model=IngestResponse, status_code=status.HTTP_202_ACCEPTED)
 async def ingest(req: IngestRequest, db: DbSession) -> IngestResponse:
+    if req.scope != "private":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="scope must be private",
+        )
     run_id = str(uuid.uuid4())
 
     await repo.create_ingestion_run(
@@ -42,6 +47,7 @@ async def ingest(req: IngestRequest, db: DbSession) -> IngestResponse:
             source_uri=req.source_uri,
             kind=req.kind,
             tags=req.tags,
+            metadata=req.metadata,
             lang=req.lang,
             data=req.data,
             chunk_max_length=req.chunk_max_length,

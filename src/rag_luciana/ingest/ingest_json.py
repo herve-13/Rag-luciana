@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from rag_luciana.clients import qdrant_client as qc
 from rag_luciana.core.chunking import chunk_text
 from rag_luciana.core.embeddings import embed_text
+from rag_luciana.core.sparse_embeddings import embed_sparse_text
 from rag_luciana.db import repo
 
 
@@ -64,12 +65,16 @@ async def ingest_json_document(
     source_uri: str | None,
     kind: str | None,
     tags: list[str] | None,
+    metadata: dict[str, Any] | None,
     lang: str | None,
     data: Any,
     chunk_max_length: int,
     chunk_overlap: int,
 ) -> int:
     """Ingest a JSON-like document and return the number of upserted chunks."""
+    if scope != "private":
+        raise ValueError("scope must be private")
+    clean_metadata = metadata if isinstance(metadata, dict) else {}
     text_nodes = _collect_text_nodes(data)
     if not text_nodes:
         return 0
@@ -93,6 +98,7 @@ async def ingest_json_document(
 
     for ordinal, item in enumerate(prepared):
         vector = first_vector if ordinal == 0 else await embed_text(item.text)
+        sparse_vector = await embed_sparse_text(item.text)
         text_hash = _sha256_hex(item.text)
         chunk_id = _sha256_hex(
             "|".join(
@@ -121,6 +127,9 @@ async def ingest_json_document(
             "source_uri": source_uri,
             "text": item.text,
         }
+        if sparse_vector and sparse_vector.readable_terms:
+            payload["sparse_terms"] = [t["term"] for t in sparse_vector.readable_terms]
+        payload.update({k: v for k, v in clean_metadata.items() if v is not None})
         # Remove null values to keep payload compact and filters predictable.
         payload = {k: v for k, v in payload.items() if v is not None}
 
@@ -139,7 +148,10 @@ async def ingest_json_document(
             text_hash=text_hash,
             lang=lang,
             tags_json=tags,
-            meta_json={"source_uri": source_uri} if source_uri else None,
+            meta_json=(
+                {k: v for k, v in {"source_uri": source_uri, **clean_metadata}.items() if v is not None}
+                or None
+            ),
         )
 
         qc.upsert_vector(
@@ -147,6 +159,8 @@ async def ingest_json_document(
             scope=scope,
             point_id=chunk_id,
             vector=vector,
+            sparse_indices=(sparse_vector.indices if sparse_vector else None),
+            sparse_values=(sparse_vector.values if sparse_vector else None),
             payload=payload,
         )
 

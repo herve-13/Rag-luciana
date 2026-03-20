@@ -27,6 +27,23 @@ class Settings(BaseSettings):
     ollama_host: str = "127.0.0.1"
     ollama_port: int = 11434
     ollama_embed_model: str = "nomic-embed-text"
+    hybrid_enabled: bool = True
+    sparse_enabled: bool = True
+    sparse_model: str = "Qdrant/bm25"
+    sparse_top_terms_log: int = 12
+    sparse_min_weight_log: float = 0.0
+    prewarm_sparse_on_startup: bool = True
+    reranker_enabled: bool = True
+    reranker_model: str = "BAAI/bge-reranker-v2-m3"
+    rrf_k: int = 60
+    rrf_k_hybrid: int = 60
+    reranker_candidate_multiplier: int = 3
+    reranker_device: str | None = None
+    reranker_batch_size: int = 16
+    reranker_max_length: int = 512
+    reranker_trust_remote_code: bool = False
+    prewarm_embeddings_on_startup: bool = True
+    prewarm_reranker_on_startup: bool = True
 
     # ── API ──────────────────────────────────────────────
     api_port: int = 8000

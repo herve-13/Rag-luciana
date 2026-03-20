@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, status
 
 from rag_luciana.api.schemas import ChunkResult, QueryRequest, QueryResponse
 from rag_luciana.core.retrieval import retrieve
@@ -18,6 +18,11 @@ router = APIRouter(tags=["query"])
 @router.post("/query", response_model=QueryResponse)
 async def query(req: QueryRequest) -> QueryResponse:
     """Semantic retrieval across character knowledge / private memory."""
+    if req.scope != "private":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="scope must be private",
+        )
     query_id = str(uuid.uuid4())
     logger.info(
         "query_start",
@@ -33,7 +38,19 @@ async def query(req: QueryRequest) -> QueryResponse:
             extra_filters["tags"] = req.filters.tags
         if req.filters.kinds:
             extra_filters["kind"] = req.filters.kinds
+        if isinstance(req.filters.metadata, dict):
+            for key, value in req.filters.metadata.items():
+                if value is None:
+                    continue
+                if isinstance(value, list):
+                    clean_values = [item for item in value if item not in (None, "")]
+                    if clean_values:
+                        extra_filters[key] = clean_values
+                    continue
+                if value != "":
+                    extra_filters[key] = value
 
+    debug_payload: dict = {}
     hits = await retrieve(
         character_id=req.character_id,
         query=req.query,
@@ -42,7 +59,9 @@ async def query(req: QueryRequest) -> QueryResponse:
         conversation_id=req.conversation_id,
         top_k=req.top_k,
         filters=extra_filters or None,
+        sparse_query=req.sparse_query.model_dump() if req.sparse_query is not None else None,
         return_text=req.return_text,
+        debug_sink=debug_payload,
     )
 
     results = [
@@ -60,6 +79,7 @@ async def query(req: QueryRequest) -> QueryResponse:
         "query_done",
         query_id=query_id,
         results_count=len(results),
+        hybrid_debug=debug_payload.get("hybrid_debug") if isinstance(debug_payload, dict) else {},
     )
 
     return QueryResponse(
@@ -68,4 +88,5 @@ async def query(req: QueryRequest) -> QueryResponse:
         user_id=req.user_id,
         top_k=req.top_k,
         results=results,
+        hybrid_debug=debug_payload.get("hybrid_debug") if isinstance(debug_payload, dict) else {},
     )

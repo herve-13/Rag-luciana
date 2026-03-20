@@ -14,9 +14,13 @@ from rag_luciana.api.gifts_router import router as gifts_router
 from rag_luciana.api.health_router import router as health_router
 from rag_luciana.api.ingest_router import router as ingest_router
 from rag_luciana.api.query_router import router as query_router
+from rag_luciana.clients import ollama_client
+from rag_luciana.core import reranker
+from rag_luciana.core import sparse_embeddings
 from rag_luciana.db.models import Base
 from rag_luciana.db.session import engine
 from rag_luciana.logging import setup_logging
+from rag_luciana.settings import settings
 
 setup_logging()
 logger = structlog.get_logger(__name__)
@@ -28,6 +32,15 @@ async def lifespan(app: FastAPI):
     # Create tables (dev convenience – use Alembic in production)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    if settings.prewarm_embeddings_on_startup:
+        warmed_embed = await ollama_client.prewarm_embed_model()
+        logger.info("startup_prewarm_embeddings", success=bool(warmed_embed))
+    if settings.prewarm_reranker_on_startup:
+        warmed_reranker = await reranker.prewarm()
+        logger.info("startup_prewarm_reranker", success=bool(warmed_reranker))
+    if settings.prewarm_sparse_on_startup:
+        warmed_sparse = await sparse_embeddings.prewarm()
+        logger.info("startup_prewarm_sparse", success=bool(warmed_sparse))
     logger.info("startup_complete")
     yield
     await engine.dispose()

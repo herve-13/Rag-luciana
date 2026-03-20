@@ -26,9 +26,11 @@ class _FakeClientSearch:
 class _FakeClientUpsert:
     def __init__(self) -> None:
         self.last_id = None
+        self.last_vector = None
 
     def upsert(self, *, collection_name, points):
         self.last_id = points[0].id
+        self.last_vector = points[0].vector
 
 
 def test_search_vectors_returns_empty_when_collection_missing(monkeypatch):
@@ -60,3 +62,24 @@ def test_upsert_vector_normalizes_non_uuid_point_id(monkeypatch):
 
     # Should always end as a UUID string accepted by Qdrant.
     uuid.UUID(str(client.last_id))
+
+
+def test_upsert_vector_private_includes_sparse_when_enabled(monkeypatch):
+    client = _FakeClientUpsert()
+    monkeypatch.setattr(qc, "get_qdrant_client", lambda: client)
+    monkeypatch.setattr(qc.settings, "hybrid_enabled", True)
+    monkeypatch.setattr(qc.settings, "sparse_enabled", True)
+
+    qc.upsert_vector(
+        character_id="npc_jean",
+        scope="private",
+        point_id="point-1",
+        vector=[0.1, 0.2, 0.3],
+        sparse_indices=[1, 2],
+        sparse_values=[0.5, 0.9],
+        payload={"chunk_id": "x"},
+    )
+
+    assert isinstance(client.last_vector, dict)
+    assert "dense" in client.last_vector
+    assert "sparse" in client.last_vector

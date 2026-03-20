@@ -27,9 +27,15 @@ CREATE TABLE IF NOT EXISTS media_assets (
   id BIGINT NOT NULL AUTO_INCREMENT,
   character_id VARCHAR(64) NOT NULL,
   file_url VARCHAR(255) NOT NULL,
+  title VARCHAR(128) NULL,
   description TEXT NULL,
   required_relationship_level TINYINT UNSIGNED NOT NULL DEFAULT 1,
   content_intensity VARCHAR(16) NOT NULL DEFAULT 'SOFT',
+  purchase_hearts_cost INT NOT NULL DEFAULT 0,
+  relation_gain_bonus INT NOT NULL DEFAULT 0,
+  is_purchasable TINYINT(1) NOT NULL DEFAULT 0,
+  media_kind VARCHAR(16) NULL,
+  sort_order INT NOT NULL DEFAULT 0,
   is_active TINYINT(1) NOT NULL DEFAULT 1,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -79,6 +85,18 @@ async def _ensure_media_assets_table(db: AsyncSession) -> None:
         )
     except Exception:
         pass
+    for ddl in (
+        "ALTER TABLE media_assets ADD COLUMN title VARCHAR(128) NULL AFTER file_url",
+        "ALTER TABLE media_assets ADD COLUMN purchase_hearts_cost INT NOT NULL DEFAULT 0 AFTER content_intensity",
+        "ALTER TABLE media_assets ADD COLUMN relation_gain_bonus INT NOT NULL DEFAULT 0 AFTER purchase_hearts_cost",
+        "ALTER TABLE media_assets ADD COLUMN is_purchasable TINYINT(1) NOT NULL DEFAULT 0 AFTER relation_gain_bonus",
+        "ALTER TABLE media_assets ADD COLUMN media_kind VARCHAR(16) NULL AFTER is_purchasable",
+        "ALTER TABLE media_assets ADD COLUMN sort_order INT NOT NULL DEFAULT 0 AFTER media_kind",
+    ):
+        try:
+            await db.execute(text(ddl))
+        except Exception:
+            pass
 
 
 async def _ensure_media_delivery_history_table(db: AsyncSession) -> None:
@@ -898,10 +916,12 @@ async def list_media_assets(
 
     list_sql = text(
         f"""
-        SELECT id, character_id, file_url, description, required_relationship_level, content_intensity, is_active, created_at, updated_at
+        SELECT id, character_id, file_url, title, description, required_relationship_level, content_intensity,
+               purchase_hearts_cost, relation_gain_bonus, is_purchasable, media_kind, sort_order,
+               is_active, created_at, updated_at
         FROM media_assets
         {where}
-        ORDER BY id DESC
+        ORDER BY sort_order ASC, id DESC
         LIMIT :limit OFFSET :offset
         """
     )
@@ -923,9 +943,15 @@ async def upsert_media_asset(
     *,
     character_id: str,
     file_url: str,
+    title: str | None = None,
     description: str | None = None,
     required_relationship_level: int = 1,
     content_intensity: str = "SOFT",
+    purchase_hearts_cost: int = 0,
+    relation_gain_bonus: int = 0,
+    is_purchasable: bool = False,
+    media_kind: str | None = None,
+    sort_order: int = 0,
     is_active: bool = True,
 ) -> dict:
     await _ensure_media_assets_table(db)
@@ -933,19 +959,31 @@ async def upsert_media_asset(
     if normalized_intensity not in {"SOFT", "SENSUAL", "ADULT", "EXPLICIT"}:
         normalized_intensity = "SOFT"
     level = max(1, min(5, int(required_relationship_level or 1)))
+    normalized_kind = (media_kind or "").strip().lower()
+    if normalized_kind not in {"photo", "video"}:
+        lower_url = str(file_url or "").lower()
+        normalized_kind = "video" if lower_url.endswith((".mp4", ".webm", ".mov", ".m4v", ".avi", ".mkv")) else "photo"
 
     upsert_sql = text(
         """
         INSERT INTO media_assets (
-          character_id, file_url, description, required_relationship_level, content_intensity, is_active
+          character_id, file_url, title, description, required_relationship_level, content_intensity,
+          purchase_hearts_cost, relation_gain_bonus, is_purchasable, media_kind, sort_order, is_active
         )
         VALUES (
-          :character_id, :file_url, :description, :required_relationship_level, :content_intensity, :is_active
+          :character_id, :file_url, :title, :description, :required_relationship_level, :content_intensity,
+          :purchase_hearts_cost, :relation_gain_bonus, :is_purchasable, :media_kind, :sort_order, :is_active
         )
         ON DUPLICATE KEY UPDATE
+          title = VALUES(title),
           description = VALUES(description),
           required_relationship_level = VALUES(required_relationship_level),
           content_intensity = VALUES(content_intensity),
+          purchase_hearts_cost = VALUES(purchase_hearts_cost),
+          relation_gain_bonus = VALUES(relation_gain_bonus),
+          is_purchasable = VALUES(is_purchasable),
+          media_kind = VALUES(media_kind),
+          sort_order = VALUES(sort_order),
           is_active = VALUES(is_active),
           updated_at = CURRENT_TIMESTAMP
         """
@@ -955,16 +993,24 @@ async def upsert_media_asset(
         {
             "character_id": character_id,
             "file_url": file_url,
+            "title": title,
             "description": description,
             "required_relationship_level": level,
             "content_intensity": normalized_intensity,
+            "purchase_hearts_cost": max(0, int(purchase_hearts_cost or 0)),
+            "relation_gain_bonus": max(0, int(relation_gain_bonus or 0)),
+            "is_purchasable": 1 if is_purchasable else 0,
+            "media_kind": normalized_kind,
+            "sort_order": max(0, int(sort_order or 0)),
             "is_active": 1 if is_active else 0,
         },
     )
 
     get_sql = text(
         """
-        SELECT id, character_id, file_url, description, required_relationship_level, content_intensity, is_active, created_at, updated_at
+        SELECT id, character_id, file_url, title, description, required_relationship_level, content_intensity,
+               purchase_hearts_cost, relation_gain_bonus, is_purchasable, media_kind, sort_order,
+               is_active, created_at, updated_at
         FROM media_assets
         WHERE character_id = :character_id AND file_url = :file_url
         LIMIT 1

@@ -46,3 +46,13 @@ async def health_check() -> bool:
             )
     except Exception:
         return False
+
+
+async def prewarm_embed_model() -> bool:
+    """Force-load the embedding model in Ollama."""
+    try:
+        await embed("warmup")
+        return True
+    except Exception:
+        logger.exception("Embedding prewarm failed.")
+        return False

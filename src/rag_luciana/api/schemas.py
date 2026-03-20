@@ -234,6 +234,16 @@ class SnapshotListResponse(PaginatedResponse):
 class QueryFilters(BaseModel):
     tags: list[str] | None = None
     kinds: list[str] | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class SparseTerm(BaseModel):
+    term: str = Field(..., min_length=1, max_length=64)
+    weight: float = Field(1.0, ge=0.0, le=1.0)
+
+
+class SparseQueryPayload(BaseModel):
+    terms: list[SparseTerm] = Field(default_factory=list, max_length=6)
 
 
 class QueryRequest(BaseModel):
@@ -242,8 +252,9 @@ class QueryRequest(BaseModel):
     conversation_id: str | None = None
     query: str = Field(..., min_length=1)
     top_k: int = Field(8, ge=1, le=100)
-    scope: str = Field("both", pattern=r"^(global|private|both)$")
+    scope: str = Field("private", pattern=r"^private$")
     filters: QueryFilters | None = None
+    sparse_query: SparseQueryPayload | None = None
     return_text: bool = True
 
 
@@ -261,6 +272,7 @@ class QueryResponse(BaseModel):
     user_id: str
     top_k: int
     results: list[ChunkResult]
+    hybrid_debug: dict[str, Any] = Field(default_factory=dict)
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -270,13 +282,14 @@ class QueryResponse(BaseModel):
 
 class IngestRequest(BaseModel):
     character_id: str = Field(..., min_length=1, max_length=64)
-    scope: str = Field("global", pattern=r"^(global|private)$")
+    scope: str = Field("private", pattern=r"^private$")
     user_id: str | None = Field(None, min_length=1, max_length=64)
     doc_id: str = Field(..., min_length=1, max_length=64)
     doc_version: int = Field(1, ge=1)
     source_uri: str | None = Field(None, max_length=512)
     kind: str | None = Field(None, max_length=32)
     tags: list[str] | None = None
+    metadata: dict[str, Any] | None = None
     lang: str | None = Field(None, max_length=16)
     data: Any
     chunk_max_length: int = Field(500, ge=100, le=5000)
@@ -284,10 +297,10 @@ class IngestRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_scope_user(self) -> "IngestRequest":
-        if self.scope == "private" and not self.user_id:
+        if self.scope != "private":
+            raise ValueError("scope must be private")
+        if not self.user_id:
             raise ValueError("user_id is required for scope=private")
-        if self.scope == "global" and self.user_id is not None:
-            raise ValueError("user_id must be null for scope=global")
         if self.chunk_overlap >= self.chunk_max_length:
             raise ValueError("chunk_overlap must be less than chunk_max_length")
         return self
@@ -322,9 +335,15 @@ class MediaAssetResponse(BaseModel):
     id: int
     character_id: str
     file_url: str
+    title: str | None = None
     description: str | None = None
     required_relationship_level: int = 1
     content_intensity: str = "SOFT"
+    purchase_hearts_cost: int = 0
+    relation_gain_bonus: int = 0
+    is_purchasable: bool = False
+    media_kind: str | None = None
+    sort_order: int = 0
     is_active: bool
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -337,9 +356,15 @@ class MediaAssetListResponse(PaginatedResponse):
 class MediaAssetUpsertRequest(BaseModel):
     character_id: str = Field(..., min_length=1, max_length=64)
     file_url: str = Field(..., min_length=1, max_length=255)
+    title: str | None = Field(None, max_length=128)
     description: str | None = None
     required_relationship_level: int = Field(1, ge=1, le=5)
     content_intensity: str = Field("SOFT", pattern=r"^(SOFT|SENSUAL|ADULT|EXPLICIT)$")
+    purchase_hearts_cost: int = Field(0, ge=0)
+    relation_gain_bonus: int = Field(0, ge=0)
+    is_purchasable: bool = False
+    media_kind: str | None = Field(None, pattern=r"^(photo|video)$")
+    sort_order: int = Field(0, ge=0)
     is_active: bool = True
 
 

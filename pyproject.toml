@@ -17,6 +17,8 @@ dependencies = [
     "httpx>=0.28,<1",
     "pydantic-settings>=2.7,<3",
     "structlog>=25,<26",
+    "fastembed>=0.7.1,<1",
+    "sentence-transformers>=3.3,<4",
 ]
 
 [project.optional-dependencies]

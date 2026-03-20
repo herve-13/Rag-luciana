@@ -539,9 +539,15 @@ async def upsert_media_asset(body: MediaAssetUpsertRequest, db: DbSession):
         db,
         character_id=body.character_id,
         file_url=body.file_url,
+        title=body.title,
         description=body.description,
         required_relationship_level=body.required_relationship_level,
         content_intensity=body.content_intensity,
+        purchase_hearts_cost=body.purchase_hearts_cost,
+        relation_gain_bonus=body.relation_gain_bonus,
+        is_purchasable=body.is_purchasable,
+        media_kind=body.media_kind,
+        sort_order=body.sort_order,
         is_active=body.is_active,
     )
     return MediaAssetResponse(**obj)
