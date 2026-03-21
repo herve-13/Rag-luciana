@@ -234,6 +234,10 @@ class SnapshotListResponse(PaginatedResponse):
 class QueryFilters(BaseModel):
     tags: list[str] | None = None
     kinds: list[str] | None = None
+    bucket: list[str] | None = None
+    subject: str | None = None
+    canonical: bool | None = None
+    source: list[str] | None = None
     metadata: dict[str, Any] | None = None
 
 
@@ -289,6 +293,10 @@ class IngestRequest(BaseModel):
     source_uri: str | None = Field(None, max_length=512)
     kind: str | None = Field(None, max_length=32)
     tags: list[str] | None = None
+    bucket: str | None = Field(None, max_length=16)
+    subject: str | None = Field(None, max_length=16)
+    canonical: bool | None = None
+    source: str | None = Field(None, max_length=16)
     metadata: dict[str, Any] | None = None
     lang: str | None = Field(None, max_length=16)
     data: Any
@@ -377,6 +385,7 @@ class MediaPickRequest(BaseModel):
         "EXPLICIT",
         pattern=r"^(SOFT|SENSUAL|ADULT|EXPLICIT)$",
     )
+    media_kind: str | None = Field(None, pattern=r"^(photo|video)$")
 
 
 class MediaPickResponse(BaseModel):

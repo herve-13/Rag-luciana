@@ -27,8 +27,8 @@ class Settings(BaseSettings):
     ollama_host: str = "127.0.0.1"
     ollama_port: int = 11434
     ollama_embed_model: str = "nomic-embed-text"
-    hybrid_enabled: bool = True
-    sparse_enabled: bool = True
+    hybrid_enabled: bool = False
+    sparse_enabled: bool = False
     sparse_model: str = "Qdrant/bm25"
     sparse_top_terms_log: int = 12
     sparse_min_weight_log: float = 0.0

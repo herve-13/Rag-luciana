@@ -38,6 +38,14 @@ async def query(req: QueryRequest) -> QueryResponse:
             extra_filters["tags"] = req.filters.tags
         if req.filters.kinds:
             extra_filters["kind"] = req.filters.kinds
+        if req.filters.bucket:
+            extra_filters["bucket"] = req.filters.bucket
+        if req.filters.subject:
+            extra_filters["subject"] = req.filters.subject
+        if req.filters.canonical is not None:
+            extra_filters["canonical"] = bool(req.filters.canonical)
+        if req.filters.source:
+            extra_filters["source"] = req.filters.source
         if isinstance(req.filters.metadata, dict):
             for key, value in req.filters.metadata.items():
                 if value is None:
@@ -75,11 +83,13 @@ async def query(req: QueryRequest) -> QueryResponse:
         for h in hits
     ]
 
+    hybrid_debug = debug_payload.get("hybrid_debug") if isinstance(debug_payload.get("hybrid_debug"), dict) else {}
+
     logger.info(
         "query_done",
         query_id=query_id,
         results_count=len(results),
-        hybrid_debug=debug_payload.get("hybrid_debug") if isinstance(debug_payload, dict) else {},
+        hybrid_debug=hybrid_debug,
     )
 
     return QueryResponse(
@@ -88,5 +98,5 @@ async def query(req: QueryRequest) -> QueryResponse:
         user_id=req.user_id,
         top_k=req.top_k,
         results=results,
-        hybrid_debug=debug_payload.get("hybrid_debug") if isinstance(debug_payload, dict) else {},
+        hybrid_debug=hybrid_debug,
     )

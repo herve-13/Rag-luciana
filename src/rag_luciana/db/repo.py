@@ -1067,6 +1067,7 @@ async def pick_media_asset_for_user(
     allow_recycle: bool = True,
     max_relationship_level: int = 5,
     max_content_intensity: str = "EXPLICIT",
+    media_kind: str | None = None,
 ) -> tuple[dict | None, str | None]:
     """
     Pick media for a user, preferring unseen assets.
@@ -1080,6 +1081,12 @@ async def pick_media_asset_for_user(
     max_intensity = (max_content_intensity or "EXPLICIT").strip().upper()
     if max_intensity not in {"SOFT", "SENSUAL", "ADULT", "EXPLICIT"}:
         max_intensity = "EXPLICIT"
+    requested_kind = (media_kind or "").strip().lower()
+    if requested_kind not in {"photo", "video"}:
+        requested_kind = ""
+    media_kind_sql = ""
+    if requested_kind:
+        media_kind_sql = " AND m.media_kind = :media_kind "
 
     intensity_rank_sql = """
       CASE m.content_intensity
@@ -1108,6 +1115,7 @@ async def pick_media_asset_for_user(
           AND m.is_active = 1
           AND m.required_relationship_level <= :max_relationship_level
           AND ({intensity_rank_sql}) <= ({max_intensity_rank_sql})
+          {media_kind_sql}
           AND NOT EXISTS (
             SELECT 1
             FROM media_delivery_history h
@@ -1127,6 +1135,7 @@ async def pick_media_asset_for_user(
                 "character_id": character_id,
                 "max_relationship_level": max_level,
                 "max_content_intensity": max_intensity,
+                "media_kind": requested_kind,
             },
         )
     ).mappings().first()
@@ -1147,6 +1156,7 @@ async def pick_media_asset_for_user(
               AND m.is_active = 1
               AND m.required_relationship_level <= :max_relationship_level
               AND ({intensity_rank_sql}) <= ({max_intensity_rank_sql})
+              {media_kind_sql}
             ORDER BY h.delivered_at ASC
             LIMIT 1
             """
@@ -1159,6 +1169,7 @@ async def pick_media_asset_for_user(
                     "character_id": character_id,
                     "max_relationship_level": max_level,
                     "max_content_intensity": max_intensity,
+                    "media_kind": requested_kind,
                 },
             )
         ).mappings().first()

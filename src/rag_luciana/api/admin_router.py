@@ -562,6 +562,7 @@ async def pick_media_asset(body: MediaPickRequest, db: DbSession):
         allow_recycle=body.allow_recycle,
         max_relationship_level=body.max_relationship_level,
         max_content_intensity=body.max_content_intensity,
+        media_kind=body.media_kind,
     )
     if item is None:
         return MediaPickResponse(item=None, source=None)

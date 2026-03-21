@@ -44,3 +44,71 @@ async def test_query_router_forwards_metadata_filters(monkeypatch):
         "json_path": "$.retrieval_text",
     }
     assert recorded["sparse_query"] is None
+
+
+@pytest.mark.asyncio
+async def test_query_router_forwards_simple_filters(monkeypatch):
+    recorded: dict = {}
+
+    async def _fake_retrieve(**kwargs):
+        recorded.update(kwargs)
+        return []
+
+    monkeypatch.setattr(query_router, "retrieve", _fake_retrieve)
+
+    req = QueryRequest(
+        character_id="luciana",
+        user_id="herve",
+        query="qui est ton pere",
+        top_k=4,
+        scope="private",
+        filters=QueryFilters(
+            kinds=["simple_memory"],
+            bucket=["persona"],
+            subject="luciana",
+            canonical=True,
+            source=["seed", "approved"],
+        ),
+    )
+
+    resp = await query_router.query(req)
+
+    assert resp.results == []
+    assert recorded["filters"] == {
+        "kind": ["simple_memory"],
+        "bucket": ["persona"],
+        "subject": "luciana",
+        "canonical": True,
+        "source": ["seed", "approved"],
+    }
+    assert recorded["sparse_query"] is None
+
+
+@pytest.mark.asyncio
+async def test_query_router_forwards_sparse_query(monkeypatch):
+    recorded: dict = {}
+
+    async def _fake_retrieve(**kwargs):
+        recorded.update(kwargs)
+        return []
+
+    monkeypatch.setattr(query_router, "retrieve", _fake_retrieve)
+
+    req = QueryRequest(
+        character_id="luciana",
+        user_id="herve",
+        query="type d'ingenierie etudie par Matteo",
+        top_k=4,
+        scope="private",
+        sparse_query={"terms": [{"term": "ingenierie", "weight": 1.0}, {"term": "Matteo", "weight": 0.8}]},
+    )
+
+    resp = await query_router.query(req)
+
+    assert resp.results == []
+    assert recorded["sparse_query"] == {
+        "terms": [
+            {"term": "ingenierie", "weight": 1.0},
+            {"term": "Matteo", "weight": 0.8},
+        ]
+    }

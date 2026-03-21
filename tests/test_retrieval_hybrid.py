@@ -109,6 +109,15 @@ async def test_retrieve_disables_sparse_without_terms(monkeypatch):
         return [0.1, 0.2, 0.3]
 
     monkeypatch.setattr(r, "embed_text", _embed_text)
+    async def _embed_sparse_text(_query):
+        return SparseEmbedding(
+            indices=[5, 7],
+            values=[0.8, 0.4],
+            readable_terms=[{"term": "matteo", "weight": 1.0}],
+        )
+
+    monkeypatch.setattr(r, "embed_sparse_text", _embed_sparse_text)
+    monkeypatch.setattr(r, "embed_sparse_terms_weighted", _embed_sparse_text)
     monkeypatch.setattr(r.qc, "search_vectors", lambda **_kwargs: [])
     monkeypatch.setattr(r.qc, "search_sparse_vectors", lambda **_kwargs: [])
 
@@ -124,8 +133,8 @@ async def test_retrieve_disables_sparse_without_terms(monkeypatch):
     )
 
     assert hits == []
-    assert debug["hybrid_debug"]["sparse_mode"] == "disabled"
-    assert debug["hybrid_debug"]["sparse_disabled_reason"] == "no_sparse_terms_from_backend"
+    assert debug["hybrid_debug"]["sparse_mode"] == "clean_query_terms_fallback"
+    assert debug["hybrid_debug"]["query_sparse_terms"][0]["term"] == "matteo"
 
 
 @pytest.mark.asyncio

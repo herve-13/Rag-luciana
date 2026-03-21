@@ -1,4 +1,4 @@
-"""Ingestion pipeline: JSON payload -> chunks -> embeddings -> SQL + Qdrant."""
+﻿"""Ingestion pipeline: simple phrase records -> SQL chunks + Qdrant."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from rag_luciana.clients import qdrant_client as qc
-from rag_luciana.core.chunking import chunk_text
 from rag_luciana.core.embeddings import embed_text
 from rag_luciana.core.sparse_embeddings import embed_sparse_text
 from rag_luciana.db import repo
@@ -23,35 +22,29 @@ class PreparedChunk:
 
 def _normalize_text(value: Any) -> str:
     if isinstance(value, str):
-        return value.strip()
-    if isinstance(value, (int, float, bool)):
-        return str(value)
+        return " ".join(value.split()).strip()
     return ""
-
-
-def _collect_text_nodes(data: Any, path: str = "$") -> list[PreparedChunk]:
-    nodes: list[PreparedChunk] = []
-
-    if isinstance(data, dict):
-        for key, value in data.items():
-            child_path = f"{path}.{key}"
-            nodes.extend(_collect_text_nodes(value, child_path))
-        return nodes
-
-    if isinstance(data, list):
-        for idx, value in enumerate(data):
-            child_path = f"{path}[{idx}]"
-            nodes.extend(_collect_text_nodes(value, child_path))
-        return nodes
-
-    text = _normalize_text(data)
-    if text:
-        nodes.append(PreparedChunk(text=text, json_path=path))
-    return nodes
 
 
 def _sha256_hex(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _collect_simple_text_nodes(data: Any) -> list[PreparedChunk]:
+    if isinstance(data, list):
+        return [
+            PreparedChunk(text=_normalize_text(item), json_path=f"$.records[{idx}]")
+            for idx, item in enumerate(data)
+            if _normalize_text(item)
+        ]
+    if isinstance(data, dict):
+        retrieval_text = _normalize_text(data.get("retrieval_text"))
+        if retrieval_text:
+            return [PreparedChunk(text=retrieval_text, json_path="$.retrieval_text")]
+    single = _normalize_text(data)
+    if single:
+        return [PreparedChunk(text=single, json_path="$.text")]
+    return []
 
 
 async def ingest_json_document(
@@ -65,40 +58,34 @@ async def ingest_json_document(
     source_uri: str | None,
     kind: str | None,
     tags: list[str] | None,
+    bucket: str | None,
+    subject: str | None,
+    canonical: bool | None,
+    source: str | None,
     metadata: dict[str, Any] | None,
     lang: str | None,
     data: Any,
     chunk_max_length: int,
     chunk_overlap: int,
 ) -> int:
-    """Ingest a JSON-like document and return the number of upserted chunks."""
     if scope != "private":
         raise ValueError("scope must be private")
     clean_metadata = metadata if isinstance(metadata, dict) else {}
-    text_nodes = _collect_text_nodes(data)
-    if not text_nodes:
-        return 0
-
-    prepared: list[PreparedChunk] = []
-    for node in text_nodes:
-        pieces = chunk_text(
-            node.text,
-            max_length=chunk_max_length,
-            overlap=chunk_overlap,
-        )
-        for piece in pieces:
-            prepared.append(PreparedChunk(text=piece, json_path=node.json_path))
-
+    prepared = _collect_simple_text_nodes(data)
     if not prepared:
         return 0
 
-    # Infer embedding size from first chunk and ensure the target collection exists.
     first_vector = await embed_text(prepared[0].text)
+    first_sparse = await embed_sparse_text(prepared[0].text)
     qc.ensure_collection(character_id, scope, vector_size=len(first_vector))
 
     for ordinal, item in enumerate(prepared):
-        vector = first_vector if ordinal == 0 else await embed_text(item.text)
-        sparse_vector = await embed_sparse_text(item.text)
+        if ordinal == 0:
+            vector = first_vector
+            sparse = first_sparse
+        else:
+            vector = await embed_text(item.text)
+            sparse = await embed_sparse_text(item.text)
         text_hash = _sha256_hex(item.text)
         chunk_id = _sha256_hex(
             "|".join(
@@ -112,7 +99,6 @@ async def ingest_json_document(
                 ]
             )
         )
-
         payload = {
             "character_id": character_id,
             "scope": scope,
@@ -121,16 +107,17 @@ async def ingest_json_document(
             "doc_version": doc_version,
             "chunk_id": chunk_id,
             "json_path": item.json_path,
-            "kind": kind,
-            "tags": tags or [],
             "lang": lang,
             "source_uri": source_uri,
             "text": item.text,
+            "bucket": bucket,
+            "subject": subject,
+            "canonical": canonical,
+            "source": source,
+            **{k: v for k, v in clean_metadata.items() if v is not None},
         }
-        if sparse_vector and sparse_vector.readable_terms:
-            payload["sparse_terms"] = [t["term"] for t in sparse_vector.readable_terms]
-        payload.update({k: v for k, v in clean_metadata.items() if v is not None})
-        # Remove null values to keep payload compact and filters predictable.
+        if sparse and sparse.readable_terms:
+            payload["sparse_terms"] = [t["term"] for t in sparse.readable_terms]
         payload = {k: v for k, v in payload.items() if v is not None}
 
         await repo.upsert_chunk(
@@ -143,24 +130,34 @@ async def ingest_json_document(
             doc_version=doc_version,
             ordinal=ordinal,
             json_path=item.json_path,
-            kind=kind,
+            kind=(kind or "simple_memory"),
             text=item.text,
             text_hash=text_hash,
             lang=lang,
             tags_json=tags,
             meta_json=(
-                {k: v for k, v in {"source_uri": source_uri, **clean_metadata}.items() if v is not None}
+                {
+                    k: v
+                    for k, v in {
+                        "source_uri": source_uri,
+                        "bucket": bucket,
+                        "subject": subject,
+                        "canonical": canonical,
+                        "source": source,
+                        **clean_metadata,
+                    }.items()
+                    if v is not None
+                }
                 or None
             ),
         )
-
         qc.upsert_vector(
             character_id=character_id,
             scope=scope,
             point_id=chunk_id,
             vector=vector,
-            sparse_indices=(sparse_vector.indices if sparse_vector else None),
-            sparse_values=(sparse_vector.values if sparse_vector else None),
+            sparse_indices=(sparse.indices if sparse else None),
+            sparse_values=(sparse.values if sparse else None),
             payload=payload,
         )
 

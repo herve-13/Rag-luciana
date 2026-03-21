@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Any
 
@@ -12,7 +13,60 @@ from rag_luciana.settings import settings
 
 logger = get_logger(__name__)
 
-_TOKEN_RE = re.compile(r"[A-Za-z0-9_]+", re.UNICODE)
+_TOKEN_RE = re.compile(r"[^\W_]+", re.UNICODE)
+_NOISE_TERMS = {
+    "a",
+    "ai",
+    "and",
+    "au",
+    "aux",
+    "c",
+    "ce",
+    "ces",
+    "d",
+    "de",
+    "des",
+    "du",
+    "en",
+    "et",
+    "j",
+    "je",
+    "l",
+    "la",
+    "le",
+    "les",
+    "m",
+    "me",
+    "mon",
+    "ma",
+    "mes",
+    "n",
+    "ne",
+    "nos",
+    "notre",
+    "ou",
+    "par",
+    "pour",
+    "qu",
+    "que",
+    "s",
+    "sa",
+    "se",
+    "ses",
+    "sur",
+    "t",
+    "te",
+    "tes",
+    "ton",
+    "ta",
+    "type",
+    "tu",
+    "un",
+    "une",
+    "vos",
+    "votre",
+    "y",
+}
 _model_lock = asyncio.Lock()
 _model: Any | None = None
 
@@ -28,8 +82,31 @@ def sparse_enabled() -> bool:
     return bool(settings.hybrid_enabled and settings.sparse_enabled)
 
 
+def _normalize_text_for_terms(text: str) -> str:
+    clean = unicodedata.normalize("NFKC", str(text or "")).lower()
+    clean = clean.replace("’", "'")
+    clean = clean.replace("'", " ")
+    clean = clean.replace("-", " ")
+    return clean
+
+
+def _is_meaningful_term(token: str) -> bool:
+    term = str(token or "").strip().lower()
+    if not term:
+        return False
+    if term in _NOISE_TERMS:
+        return False
+    if len(term) <= 1:
+        return False
+    if len(term) == 2 and not any(ch.isdigit() for ch in term):
+        return False
+    return True
+
+
 def _build_readable_terms(text: str) -> list[dict[str, float]]:
-    tokens = [m.group(0).lower() for m in _TOKEN_RE.finditer(text)]
+    normalized = _normalize_text_for_terms(text)
+    tokens = [m.group(0).lower() for m in _TOKEN_RE.finditer(normalized)]
+    tokens = [token for token in tokens if _is_meaningful_term(token)]
     if not tokens:
         return []
     counts: dict[str, int] = {}
@@ -111,11 +188,15 @@ async def embed_sparse_text(text: str) -> SparseEmbedding | None:
 
 
 def _normalize_term(term: str) -> str:
-    token = str(term or "").strip().lower()
+    token = _normalize_text_for_terms(term)
     matches = _TOKEN_RE.findall(token)
     if not matches:
         return ""
-    return matches[0]
+    for match in matches:
+        normalized = str(match or "").strip().lower()
+        if _is_meaningful_term(normalized):
+            return normalized
+    return ""
 
 
 async def embed_sparse_terms_weighted(terms: list[dict[str, float]]) -> SparseEmbedding | None:
