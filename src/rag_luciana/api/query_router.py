@@ -77,6 +77,9 @@ async def query(req: QueryRequest) -> QueryResponse:
             chunk_id=h.chunk_id,
             doc_id=h.doc_id,
             score=h.score,
+            score_source=h.score_source,
+            display_score=h.display_score,
+            display_band=h.display_band,
             text=h.text,
             metadata=h.metadata,
         )

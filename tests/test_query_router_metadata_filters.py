@@ -112,3 +112,36 @@ async def test_query_router_forwards_sparse_query(monkeypatch):
             {"term": "Matteo", "weight": 0.8},
         ]
     }
+
+
+@pytest.mark.asyncio
+async def test_query_router_returns_display_score_fields(monkeypatch):
+    async def _fake_retrieve(**_kwargs):
+        return [
+            query_router.ChunkResult.model_construct(
+                chunk_id="c1",
+                doc_id="d1",
+                score=0.0134,
+                score_source="hybrid_rrf",
+                display_score=84,
+                display_band="fort",
+                text="memoire",
+                metadata={"dense_score": 0.45},
+            )
+        ]
+
+    monkeypatch.setattr(query_router, "retrieve", _fake_retrieve)
+
+    req = QueryRequest(
+        character_id="luciana",
+        user_id="herve",
+        query="memoire",
+        top_k=1,
+        scope="private",
+    )
+
+    resp = await query_router.query(req)
+
+    assert resp.results[0].score_source == "hybrid_rrf"
+    assert resp.results[0].display_score == 84
+    assert resp.results[0].display_band == "fort"

@@ -266,6 +266,9 @@ class ChunkResult(BaseModel):
     chunk_id: str
     doc_id: str
     score: float
+    score_source: str = "dense"
+    display_score: int = Field(0, ge=0, le=100)
+    display_band: str = Field("faible", pattern=r"^(faible|moyen|fort|tres_fort)$")
     text: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 

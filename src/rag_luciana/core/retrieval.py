@@ -21,6 +21,9 @@ class ChunkHit:
     doc_id: str
     score: float
     text: str | None
+    score_source: str = "dense"
+    display_score: int = 0
+    display_band: str = "faible"
     rerank_text: str | None = None
     metadata: dict = field(default_factory=dict)
 
@@ -76,10 +79,62 @@ def _build_chunk_hit(*, payload: dict, score: float, return_text: bool) -> Chunk
         chunk_id=str(payload.get("chunk_id") or ""),
         doc_id=str(payload.get("doc_id") or ""),
         score=float(score),
+        score_source="dense",
+        display_score=0,
+        display_band="faible",
         text=payload_text if return_text else None,
         rerank_text=payload_text,
         metadata={k: v for k, v in payload.items() if k not in ("text",)},
     )
+
+
+def _clamp_score_0_100(value: float) -> int:
+    return max(0, min(100, int(round(value))))
+
+
+def _display_band(score: int) -> str:
+    if score >= 85:
+        return "tres_fort"
+    if score >= 70:
+        return "fort"
+    if score >= 50:
+        return "moyen"
+    return "faible"
+
+
+def _dense_display_score(dense_score: float) -> int:
+    # Dense score remains a technical similarity. Use a conservative linearized display score.
+    normalized = max(0.0, min(1.0, float(dense_score)))
+    return _clamp_score_0_100(normalized * 100.0)
+
+
+def _hybrid_display_score(*, rank: int, total: int) -> int:
+    if total <= 1:
+        return 92
+    position = max(0.0, min(1.0, float(rank - 1) / float(total - 1)))
+    return _clamp_score_0_100(92.0 - (position * 32.0))
+
+
+def _apply_display_scores(hits: list[ChunkHit]) -> None:
+    for hit in hits:
+        display_source = str(hit.metadata.get("display_score_source") or hit.metadata.get("retrieval_stage") or "").strip().lower()
+        if display_source == "hybrid_rrf":
+            rank = int(hit.metadata.get("display_rank") or 1)
+            total = int(hit.metadata.get("display_total") or len(hits) or 1)
+            display_score = _hybrid_display_score(rank=rank, total=total)
+        else:
+            dense_score = hit.metadata.get("dense_score")
+            if dense_score is None:
+                dense_score = hit.metadata.get("base_score")
+            if dense_score is None:
+                dense_score = hit.score
+            display_score = _dense_display_score(float(dense_score))
+        hit.display_score = display_score
+        hit.display_band = _display_band(display_score)
+        hit.metadata["score_source"] = hit.score_source
+        hit.metadata["display_score"] = display_score
+        hit.metadata["display_band"] = hit.display_band
+        hit.metadata["final_score_raw"] = float(hit.score)
 
 
 async def retrieve(
@@ -213,13 +268,24 @@ async def retrieve(
     if sparse_hits:
         for hit in deduped:
             hit.metadata["retrieval_stage"] = "hybrid_rrf"
+            hit.metadata["display_score_source"] = "hybrid_rrf"
+            hit.score_source = "hybrid_rrf"
             hit.score = float(hit.metadata.get("rrf_score") or 0.0)
         deduped.sort(key=lambda h: h.score, reverse=True)
     else:
         for hit in deduped:
             hit.metadata["retrieval_stage"] = "dense"
+            hit.metadata["display_score_source"] = "dense"
+            hit.score_source = "dense"
             hit.score = float(hit.metadata.get("dense_score") or 0.0)
         deduped.sort(key=lambda h: h.score, reverse=True)
+
+    base_total = len(deduped)
+    for rank, hit in enumerate(deduped, start=1):
+        hit.metadata["display_rank"] = int(rank)
+        hit.metadata["display_total"] = int(base_total)
+        hit.metadata["base_score_source"] = str(hit.score_source)
+        hit.metadata["base_score"] = float(hit.score)
 
     if reranker_enabled() and deduped:
         rerank_indices: list[int] = []
@@ -235,11 +301,13 @@ async def retrieve(
                 for idx, rerank_score in zip(rerank_indices, rerank_scores, strict=True):
                     hit = deduped[idx]
                     hit.metadata["rerank_score"] = float(rerank_score)
-                    hit.metadata["retrieval_stage"] = "reranked"
+                    hit.metadata["ranking_stage"] = "reranked"
+                    hit.score_source = "reranked"
                     hit.score = float(rerank_score)
                 deduped.sort(key=lambda h: h.score, reverse=True)
 
     deduped = deduped[:top_k]
+    _apply_display_scores(deduped)
 
     if isinstance(debug_sink, dict):
         debug_sink["hybrid_debug"] = {
@@ -273,6 +341,15 @@ async def retrieve(
                     "chunk_id": hit.chunk_id,
                     "doc_id": hit.doc_id,
                     "score": hit.score,
+                    "score_source": hit.score_source,
+                    "retrieval_stage": str(hit.metadata.get("retrieval_stage") or ""),
+                    "ranking_stage": str(hit.metadata.get("ranking_stage") or ""),
+                    "dense_score": hit.metadata.get("dense_score"),
+                    "sparse_score": hit.metadata.get("sparse_score"),
+                    "rrf_score": hit.metadata.get("rrf_score"),
+                    "rerank_score": hit.metadata.get("rerank_score"),
+                    "display_score": hit.display_score,
+                    "display_band": hit.display_band,
                     "text_preview": str(hit.text or "")[:180],
                 }
                 for hit in deduped

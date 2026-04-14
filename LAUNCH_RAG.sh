@@ -36,6 +36,22 @@ else
 fi
 
 # 2. API RAG Luciana
+log "Demarrage Ollama CPU pour embeddings RAG..."
+if curl -fs http://127.0.0.1:11435/api/tags > /dev/null 2>&1; then
+    log "Ollama CPU deja actif sur :11435"
+else
+    nohup env CUDA_VISIBLE_DEVICES=-1 OLLAMA_HOST=127.0.0.1:11435 \
+        ollama serve > /tmp/ollama_cpu.log 2>&1 &
+    for i in $(seq 1 30); do
+        if curl -fs http://127.0.0.1:11435/api/tags > /dev/null 2>&1; then
+            log "OK: Ollama CPU embeddings (127.0.0.1:11435)"
+            break
+        fi
+        sleep 1
+    done
+fi
+
+# 3. API RAG Luciana
 log "Demarrage API RAG Luciana..."
 if curl -fs http://127.0.0.1:8002/healthz > /dev/null 2>&1; then
     log "API RAG deja active sur :8002"
@@ -58,7 +74,7 @@ else
     done
 fi
 
-# 3. Verification finale
+# 4. Verification finale
 log "Verification readyz..."
 READYZ="$(curl -s http://127.0.0.1:8002/readyz || true)"
 log "readyz: $READYZ"
