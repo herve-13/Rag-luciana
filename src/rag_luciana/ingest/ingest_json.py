@@ -50,7 +50,8 @@ def _collect_simple_text_nodes(data: Any) -> list[PreparedChunk]:
 async def ingest_json_document(
     db: AsyncSession,
     *,
-    character_id: str,
+    tenant_id: str,
+    assistant_id: str | None = None,
     scope: str,
     user_id: str | None,
     doc_id: str,
@@ -68,8 +69,14 @@ async def ingest_json_document(
     chunk_max_length: int,
     chunk_overlap: int,
 ) -> int:
+    resolved_assistant_id = str(assistant_id or "").strip()
+    if not resolved_assistant_id:
+        raise ValueError("assistant_id is required")
     if scope != "private":
         raise ValueError("scope must be private")
+    resolved_tenant_id = str(tenant_id or "").strip()
+    if not resolved_tenant_id:
+        raise ValueError("tenant_id is required")
     clean_metadata = metadata if isinstance(metadata, dict) else {}
     prepared = _collect_simple_text_nodes(data)
     if not prepared:
@@ -77,7 +84,12 @@ async def ingest_json_document(
 
     first_vector = await embed_text(prepared[0].text)
     first_sparse = await embed_sparse_text(prepared[0].text)
-    qc.ensure_collection(character_id, scope, vector_size=len(first_vector))
+    qc.ensure_collection(
+        assistant_id=resolved_assistant_id,
+        scope=scope,
+        vector_size=len(first_vector),
+        tenant_id=resolved_tenant_id,
+    )
 
     for ordinal, item in enumerate(prepared):
         if ordinal == 0:
@@ -90,7 +102,7 @@ async def ingest_json_document(
         chunk_id = _sha256_hex(
             "|".join(
                 [
-                    character_id,
+                    resolved_assistant_id,
                     scope,
                     user_id or "",
                     doc_id,
@@ -100,7 +112,8 @@ async def ingest_json_document(
             )
         )
         payload = {
-            "character_id": character_id,
+            "tenant_id": resolved_tenant_id,
+            "assistant_id": resolved_assistant_id,
             "scope": scope,
             "user_id": user_id,
             "doc_id": doc_id,
@@ -123,7 +136,8 @@ async def ingest_json_document(
         await repo.upsert_chunk(
             db,
             chunk_id=chunk_id,
-            character_id=character_id,
+            tenant_id=resolved_tenant_id,
+            character_id=resolved_assistant_id,
             scope=scope,
             user_id=user_id,
             doc_id=doc_id,
@@ -152,8 +166,9 @@ async def ingest_json_document(
             ),
         )
         qc.upsert_vector(
-            character_id=character_id,
+            assistant_id=resolved_assistant_id,
             scope=scope,
+            tenant_id=resolved_tenant_id,
             point_id=chunk_id,
             vector=vector,
             sparse_indices=(sparse.indices if sparse else None),

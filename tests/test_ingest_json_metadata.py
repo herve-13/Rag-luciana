@@ -15,8 +15,8 @@ async def test_ingest_json_document_copies_metadata_to_vector_payload(monkeypatc
     async def _fake_upsert_chunk(*args, **kwargs):
         captured["repo_meta_json"] = kwargs.get("meta_json")
 
-    def _fake_ensure_collection(character_id: str, scope: str, vector_size: int = 768) -> None:
-        captured["collection"] = (character_id, scope, vector_size)
+    def _fake_ensure_collection(assistant_id: str | None = None, scope: str = "", vector_size: int = 768, tenant_id: str | None = None, **kwargs) -> None:
+        captured["collection"] = (tenant_id, assistant_id or kwargs.get("character_id"), scope, vector_size)
 
     def _fake_upsert_vector(*, payload: dict, **_kwargs) -> None:
         captured["payload"] = payload
@@ -28,7 +28,8 @@ async def test_ingest_json_document_copies_metadata_to_vector_payload(monkeypatc
 
     count = await ingest_json.ingest_json_document(
         db=None,
-        character_id="luciana",
+        tenant_id="herve",
+        assistant_id="luciana",
         scope="private",
         user_id="herve",
         doc_id="mem_1",
@@ -48,6 +49,9 @@ async def test_ingest_json_document_copies_metadata_to_vector_payload(monkeypatc
     )
 
     assert count == 1
+    assert captured["collection"][0] == "herve"
+    assert captured["payload"]["tenant_id"] == "herve"
+    assert captured["payload"]["assistant_id"] == "luciana"
     assert captured["payload"]["memory_id"] == "mem_1"
     assert captured["payload"]["bucket"] == "persona"
     assert captured["payload"]["subject"] == "luciana"
@@ -64,8 +68,8 @@ async def test_ingest_json_document_simple_records_keep_simple_metadata(monkeypa
     async def _fake_upsert_chunk(*args, **kwargs):
         captured.setdefault("repo_meta_json", []).append(kwargs.get("meta_json"))
 
-    def _fake_ensure_collection(character_id: str, scope: str, vector_size: int = 768) -> None:
-        captured["collection"] = (character_id, scope, vector_size)
+    def _fake_ensure_collection(assistant_id: str | None = None, scope: str = "", vector_size: int = 768, tenant_id: str | None = None, **kwargs) -> None:
+        captured["collection"] = (tenant_id, assistant_id or kwargs.get("character_id"), scope, vector_size)
 
     def _fake_upsert_vector(*, payload: dict, **_kwargs) -> None:
         captured.setdefault("payloads", []).append(payload)
@@ -77,7 +81,8 @@ async def test_ingest_json_document_simple_records_keep_simple_metadata(monkeypa
 
     count = await ingest_json.ingest_json_document(
         db=None,
-        character_id="luciana",
+        tenant_id="herve",
+        assistant_id="luciana",
         scope="private",
         user_id="herve",
         doc_id="simple_1",
@@ -97,6 +102,9 @@ async def test_ingest_json_document_simple_records_keep_simple_metadata(monkeypa
     )
 
     assert count == 2
+    assert captured["collection"][0] == "herve"
+    assert captured["payloads"][0]["tenant_id"] == "herve"
+    assert captured["payloads"][0]["assistant_id"] == "luciana"
     assert captured["payloads"][0]["bucket"] == "persona"
     assert captured["payloads"][0]["subject"] == "luciana"
     assert captured["payloads"][0]["canonical"] is True

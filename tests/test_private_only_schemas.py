@@ -29,7 +29,7 @@ def test_query_request_requires_private_scope():
 
 def test_query_request_accepts_sparse_query_terms():
     req = QueryRequest(
-        character_id="luciana",
+        assistant_id="luciana",
         user_id="u1",
         query="qui est ton pere",
         scope="private",
@@ -38,3 +38,31 @@ def test_query_request_accepts_sparse_query_terms():
     assert req.sparse_query is not None
     assert len(req.sparse_query.terms) == 1
     assert req.sparse_query.terms[0].term == "pere"
+    assert req.tenant_id == "herve"
+    assert req.assistant_id == "luciana"
+    assert req.character_id == "luciana"
+
+
+def test_ingest_request_accepts_assistant_id_alias():
+    req = IngestRequest(
+        assistant_id="luciana",
+        scope="private",
+        user_id="u1",
+        doc_id="d1",
+        data={"retrieval_text": "x"},
+    )
+
+    assert req.tenant_id == "herve"
+    assert req.assistant_id == "luciana"
+    assert req.character_id == "luciana"
+
+
+def test_query_request_rejects_mismatched_assistant_and_character_ids():
+    with pytest.raises(ValidationError):
+        QueryRequest(
+            assistant_id="marina",
+            character_id="luciana",
+            user_id="u1",
+            query="hello",
+            scope="private",
+        )

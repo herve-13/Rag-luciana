@@ -27,6 +27,10 @@ class _FakeClientUpsert:
     def __init__(self) -> None:
         self.last_id = None
         self.last_vector = None
+        self._names: list[str] = []
+
+    def get_collections(self):
+        return _Collections(self._names)
 
     def upsert(self, *, collection_name, points):
         self.last_id = points[0].id
@@ -38,7 +42,7 @@ def test_search_vectors_returns_empty_when_collection_missing(monkeypatch):
     monkeypatch.setattr(qc, "get_qdrant_client", lambda: client)
 
     result = qc.search_vectors(
-        character_id="npc_jean",
+        assistant_id="npc_jean",
         scope="global",
         vector=[0.1, 0.2, 0.3],
         limit=5,
@@ -53,7 +57,7 @@ def test_upsert_vector_normalizes_non_uuid_point_id(monkeypatch):
     monkeypatch.setattr(qc, "get_qdrant_client", lambda: client)
 
     qc.upsert_vector(
-        character_id="npc_jean",
+        assistant_id="npc_jean",
         scope="global",
         point_id="fc6a06301394135e32f6ce6ad3a3a43e1330844d7c8abf9a5739cf0e7f029cee",
         vector=[0.1, 0.2, 0.3],
@@ -71,7 +75,7 @@ def test_upsert_vector_private_includes_sparse_when_enabled(monkeypatch):
     monkeypatch.setattr(qc.settings, "sparse_enabled", True)
 
     qc.upsert_vector(
-        character_id="npc_jean",
+        assistant_id="npc_jean",
         scope="private",
         point_id="point-1",
         vector=[0.1, 0.2, 0.3],
@@ -83,3 +87,19 @@ def test_upsert_vector_private_includes_sparse_when_enabled(monkeypatch):
     assert isinstance(client.last_vector, dict)
     assert "dense" in client.last_vector
     assert "sparse" in client.last_vector
+
+
+def test_collection_name_stays_legacy_by_default(monkeypatch):
+    monkeypatch.setattr(qc.settings, "qdrant_tenant_scoped_collections", False)
+
+    name = qc.collection_name("npc_jean", "private", tenant_id="tenant_a")
+
+    assert name == "rag_npc_jean_private"
+
+
+def test_collection_name_can_be_tenant_scoped(monkeypatch):
+    monkeypatch.setattr(qc.settings, "qdrant_tenant_scoped_collections", True)
+
+    name = qc.collection_name("npc_jean", "private", tenant_id="tenant_a")
+
+    assert name == "rag_tenant_a_npc_jean_private"

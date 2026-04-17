@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 import uuid
 from contextlib import asynccontextmanager
+from typing import Awaitable
 
 import structlog
 from fastapi import FastAPI, Request
@@ -17,8 +19,9 @@ from rag_luciana.api.query_router import router as query_router
 from rag_luciana.clients import ollama_client
 from rag_luciana.core import reranker
 from rag_luciana.core import sparse_embeddings
+from rag_luciana.db import repo
 from rag_luciana.db.models import Base
-from rag_luciana.db.session import engine
+from rag_luciana.db.session import async_session_factory, engine
 from rag_luciana.logging import setup_logging
 from rag_luciana.settings import settings
 
@@ -26,21 +29,54 @@ setup_logging()
 logger = structlog.get_logger(__name__)
 
 
+async def _run_startup_prewarm(
+    step_name: str,
+    enabled: bool,
+    operation: Awaitable[bool],
+) -> None:
+    """Keep startup non-blocking even if a prewarm step is slow or fails."""
+    if not enabled:
+        return
+
+    timeout_s = max(1.0, float(settings.startup_prewarm_timeout_seconds))
+    try:
+        success = await asyncio.wait_for(operation, timeout=timeout_s)
+        logger.info(step_name, success=bool(success))
+    except asyncio.TimeoutError:
+        logger.warning(step_name, success=False, timed_out=True, timeout_s=timeout_s)
+    except Exception as exc:
+        logger.warning(step_name, success=False, error=str(exc))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
-    # Create tables (dev convenience – use Alembic in production)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    if settings.prewarm_embeddings_on_startup:
-        warmed_embed = await ollama_client.prewarm_embed_model()
-        logger.info("startup_prewarm_embeddings", success=bool(warmed_embed))
-    if settings.prewarm_reranker_on_startup:
-        warmed_reranker = await reranker.prewarm()
-        logger.info("startup_prewarm_reranker", success=bool(warmed_reranker))
-    if settings.prewarm_sparse_on_startup:
-        warmed_sparse = await sparse_embeddings.prewarm()
-        logger.info("startup_prewarm_sparse", success=bool(warmed_sparse))
+        await repo.run_progressive_schema_migrations(conn)
+    async with async_session_factory() as session:
+        await repo.sync_assistant_registry_from_characters(
+            session,
+            tenant_id=settings.default_tenant_id,
+        )
+        await session.commit()
+
+    await _run_startup_prewarm(
+        "startup_prewarm_embeddings",
+        settings.prewarm_embeddings_on_startup,
+        ollama_client.prewarm_embed_model(),
+    )
+    await _run_startup_prewarm(
+        "startup_prewarm_reranker",
+        settings.prewarm_reranker_on_startup,
+        reranker.prewarm(),
+    )
+    await _run_startup_prewarm(
+        "startup_prewarm_sparse",
+        settings.prewarm_sparse_on_startup,
+        sparse_embeddings.prewarm(),
+    )
+
     logger.info("startup_complete")
     yield
     await engine.dispose()
@@ -54,15 +90,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# ── Routers ──────────────────────────────────────────────
 app.include_router(health_router)
 app.include_router(query_router)
 app.include_router(ingest_router)
 app.include_router(admin_router)
 app.include_router(gifts_router)
-
-
-# ── Request logging middleware ───────────────────────────
 
 
 @app.middleware("http")

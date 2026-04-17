@@ -44,10 +44,15 @@ class Settings(BaseSettings):
     reranker_trust_remote_code: bool = False
     prewarm_embeddings_on_startup: bool = True
     prewarm_reranker_on_startup: bool = True
+    startup_prewarm_timeout_seconds: float = 20.0
 
     # ── API ──────────────────────────────────────────────
     api_port: int = 8000
     admin_key: str = "super-secret-admin-key"
+    default_tenant_id: str = "herve"
+    default_tenant_label: str = "Client Hervé"
+    default_assistant_id: str = "luciana"
+    qdrant_tenant_scoped_collections: bool = False
 
     # ── Derived ──────────────────────────────────────────
     @property

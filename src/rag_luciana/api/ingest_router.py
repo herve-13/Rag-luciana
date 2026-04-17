@@ -19,6 +19,8 @@ router = APIRouter(tags=["ingest"], dependencies=[AdminAuth])
 
 @router.post("/ingest", response_model=IngestResponse, status_code=status.HTTP_202_ACCEPTED)
 async def ingest(req: IngestRequest, db: DbSession) -> IngestResponse:
+    tenant_id = str(req.tenant_id or "").strip()
+    assistant_id = str(req.assistant_id or "").strip()
     if req.scope != "private":
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -29,7 +31,8 @@ async def ingest(req: IngestRequest, db: DbSession) -> IngestResponse:
     await repo.create_ingestion_run(
         db,
         run_id=run_id,
-        character_id=req.character_id,
+        tenant_id=tenant_id,
+        character_id=assistant_id,
         scope=req.scope,
         user_id=req.user_id,
         source_uri=req.source_uri,
@@ -39,7 +42,8 @@ async def ingest(req: IngestRequest, db: DbSession) -> IngestResponse:
     try:
         chunks_count = await ingest_json_document(
             db,
-            character_id=req.character_id,
+            tenant_id=tenant_id,
+            assistant_id=assistant_id,
             scope=req.scope,
             user_id=req.user_id,
             doc_id=req.doc_id,
@@ -60,20 +64,23 @@ async def ingest(req: IngestRequest, db: DbSession) -> IngestResponse:
         await repo.finish_ingestion_run(
             db,
             run_id=run_id,
-            character_id=req.character_id,
+            tenant_id=tenant_id,
+            character_id=assistant_id,
             status="success",
             chunks_count=chunks_count,
         )
         logger.info(
             "ingest_success",
             run_id=run_id,
-            character_id=req.character_id,
+            tenant_id=tenant_id,
+            assistant_id=assistant_id,
             scope=req.scope,
             chunks_count=chunks_count,
         )
         return IngestResponse(
             run_id=run_id,
-            character_id=req.character_id,
+            tenant_id=tenant_id,
+            assistant_id=assistant_id,
             scope=req.scope,
             user_id=req.user_id,
             doc_id=req.doc_id,
@@ -85,7 +92,8 @@ async def ingest(req: IngestRequest, db: DbSession) -> IngestResponse:
         await repo.finish_ingestion_run(
             db,
             run_id=run_id,
-            character_id=req.character_id,
+            tenant_id=tenant_id,
+            character_id=assistant_id,
             status="failed",
             chunks_count=0,
             error=str(exc)[:2000],
@@ -95,7 +103,8 @@ async def ingest(req: IngestRequest, db: DbSession) -> IngestResponse:
         logger.error(
             "ingest_failed",
             run_id=run_id,
-            character_id=req.character_id,
+            tenant_id=tenant_id,
+            assistant_id=assistant_id,
             scope=req.scope,
             error=str(exc),
             exc_info=True,

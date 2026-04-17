@@ -18,6 +18,8 @@ router = APIRouter(tags=["query"])
 @router.post("/query", response_model=QueryResponse)
 async def query(req: QueryRequest) -> QueryResponse:
     """Semantic retrieval across character knowledge / private memory."""
+    tenant_id = str(req.tenant_id or "").strip()
+    assistant_id = str(req.assistant_id or "").strip()
     if req.scope != "private":
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -27,7 +29,8 @@ async def query(req: QueryRequest) -> QueryResponse:
     logger.info(
         "query_start",
         query_id=query_id,
-        character_id=req.character_id,
+        tenant_id=tenant_id,
+        assistant_id=assistant_id,
         scope=req.scope,
     )
 
@@ -60,7 +63,8 @@ async def query(req: QueryRequest) -> QueryResponse:
 
     debug_payload: dict = {}
     hits = await retrieve(
-        character_id=req.character_id,
+        tenant_id=tenant_id,
+        assistant_id=assistant_id,
         query=req.query,
         scope=req.scope,
         user_id=req.user_id,
@@ -91,13 +95,15 @@ async def query(req: QueryRequest) -> QueryResponse:
     logger.info(
         "query_done",
         query_id=query_id,
+        tenant_id=tenant_id,
         results_count=len(results),
         hybrid_debug=hybrid_debug,
     )
 
     return QueryResponse(
         query_id=query_id,
-        character_id=req.character_id,
+        tenant_id=tenant_id,
+        assistant_id=assistant_id,
         user_id=req.user_id,
         top_k=req.top_k,
         results=results,

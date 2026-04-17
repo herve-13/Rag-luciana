@@ -13,6 +13,24 @@ from rag_luciana.settings import settings
 logger = get_logger(__name__)
 
 
+def _resolve_tenant_id(tenant_id: str | None = None) -> str:
+    resolved = str(tenant_id or settings.default_tenant_id or "").strip()
+    if not resolved:
+        raise ValueError("tenant_id is required")
+    return resolved
+
+
+def _resolve_assistant_id(assistant_id: str | None = None) -> str:
+    resolved = str(assistant_id or "").strip()
+    if not resolved:
+        raise ValueError("assistant_id is required")
+    return resolved
+
+
+def _base_collection_name(assistant_id: str, scope: str) -> str:
+    return f"rag_{assistant_id}_{scope}"
+
+
 def _build_client() -> QdrantClient:
     return QdrantClient(
         host=settings.qdrant_host,
@@ -35,15 +53,57 @@ def get_qdrant_client() -> QdrantClient:
 # ── Collection helpers ───────────────────────────────────
 
 
-def collection_name(character_id: str, scope: str) -> str:
-    """Return the Qdrant collection name for a character + scope."""
-    return f"rag_{character_id}_{scope}"
+def collection_name(
+    assistant_id: str | None = None,
+    scope: str = "",
+    tenant_id: str | None = None,
+) -> str:
+    """Return the primary Qdrant collection name for a tenant + assistant + scope."""
+    resolved_assistant_id = _resolve_assistant_id(assistant_id)
+    if not settings.qdrant_tenant_scoped_collections:
+        return _base_collection_name(resolved_assistant_id, scope)
+    resolved_tenant_id = _resolve_tenant_id(tenant_id)
+    return f"rag_{resolved_tenant_id}_{resolved_assistant_id}_{scope}"
 
 
-def ensure_collection(character_id: str, scope: str, vector_size: int = 768) -> None:
+def _collection_candidates(
+    assistant_id: str | None = None,
+    scope: str = "",
+    tenant_id: str | None = None,
+) -> list[str]:
+    resolved_assistant_id = _resolve_assistant_id(assistant_id)
+    primary = collection_name(resolved_assistant_id, scope, tenant_id=tenant_id)
+    base_name = _base_collection_name(resolved_assistant_id, scope)
+    if primary == base_name:
+        return [primary]
+    return [primary, base_name]
+
+
+def _select_collection_name(
+    *,
+    client: QdrantClient,
+    assistant_id: str | None = None,
+    scope: str,
+    tenant_id: str | None = None,
+) -> tuple[str, set[str]]:
+    resolved_assistant_id = _resolve_assistant_id(assistant_id)
+    existing = {c.name for c in client.get_collections().collections}
+    for candidate in _collection_candidates(resolved_assistant_id, scope, tenant_id=tenant_id):
+        if candidate in existing:
+            return candidate, existing
+    return collection_name(resolved_assistant_id, scope, tenant_id=tenant_id), existing
+
+
+def ensure_collection(
+    assistant_id: str | None = None,
+    scope: str = "",
+    vector_size: int = 768,
+    tenant_id: str | None = None,
+) -> None:
     """Create the collection if it doesn't exist."""
     client = get_qdrant_client()
-    name = collection_name(character_id, scope)
+    resolved_assistant_id = _resolve_assistant_id(assistant_id)
+    name = collection_name(resolved_assistant_id, scope, tenant_id=tenant_id)
     existing = [c.name for c in client.get_collections().collections]
     if name not in existing:
         if scope == "private" and settings.hybrid_enabled and settings.sparse_enabled:
@@ -76,16 +136,23 @@ def ensure_collection(character_id: str, scope: str, vector_size: int = 768) -> 
 
 
 def search_vectors(
-    character_id: str,
-    scope: str,
+    assistant_id: str | None = None,
+    scope: str = "",
+    *,
     vector: list[float],
     limit: int = 10,
     filters: dict | None = None,
+    tenant_id: str | None = None,
 ) -> list[models.ScoredPoint]:
     """Search a Qdrant collection with optional payload filters."""
     client = get_qdrant_client()
-    name = collection_name(character_id, scope)
-    existing = {c.name for c in client.get_collections().collections}
+    resolved_assistant_id = _resolve_assistant_id(assistant_id)
+    name, existing = _select_collection_name(
+        client=client,
+        assistant_id=resolved_assistant_id,
+        scope=scope,
+        tenant_id=tenant_id,
+    )
     if name not in existing:
         return []
 
@@ -129,20 +196,26 @@ def search_vectors(
 
 
 def search_sparse_vectors(
-    character_id: str,
-    scope: str,
+    assistant_id: str | None = None,
+    scope: str = "",
     *,
     indices: list[int],
     values: list[float],
     limit: int = 10,
     filters: dict | None = None,
+    tenant_id: str | None = None,
 ) -> list[models.ScoredPoint]:
     """Search sparse vector branch in a Qdrant collection."""
     if not indices or not values or len(indices) != len(values):
         return []
     client = get_qdrant_client()
-    name = collection_name(character_id, scope)
-    existing = {c.name for c in client.get_collections().collections}
+    resolved_assistant_id = _resolve_assistant_id(assistant_id)
+    name, existing = _select_collection_name(
+        client=client,
+        assistant_id=resolved_assistant_id,
+        scope=scope,
+        tenant_id=tenant_id,
+    )
     if name not in existing:
         return []
 
@@ -184,17 +257,25 @@ def search_sparse_vectors(
 
 
 def upsert_vector(
-    character_id: str,
-    scope: str,
+    assistant_id: str | None = None,
+    scope: str = "",
+    *,
     point_id: str,
     vector: list[float],
     payload: dict,
     sparse_indices: list[int] | None = None,
     sparse_values: list[float] | None = None,
+    tenant_id: str | None = None,
 ) -> None:
     """Upsert a single vector point."""
     client = get_qdrant_client()
-    name = collection_name(character_id, scope)
+    resolved_assistant_id = _resolve_assistant_id(assistant_id)
+    name, _existing = _select_collection_name(
+        client=client,
+        assistant_id=resolved_assistant_id,
+        scope=scope,
+        tenant_id=tenant_id,
+    )
     normalized_id: int | str
     if isinstance(point_id, int):
         normalized_id = point_id
@@ -239,16 +320,24 @@ def upsert_vector(
 
 
 def delete_by_filter(
-    character_id: str,
-    scope: str,
+    assistant_id: str | None = None,
+    scope: str = "",
+    *,
     filters: dict,
+    tenant_id: str | None = None,
 ) -> None:
     """Delete all points matching the payload filters.
 
     Used when purging a conversation's private memory from Qdrant.
     """
     client = get_qdrant_client()
-    name = collection_name(character_id, scope)
+    resolved_assistant_id = _resolve_assistant_id(assistant_id)
+    name, _existing = _select_collection_name(
+        client=client,
+        assistant_id=resolved_assistant_id,
+        scope=scope,
+        tenant_id=tenant_id,
+    )
 
     must_conditions = []
     for key, value in filters.items():

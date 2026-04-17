@@ -15,12 +15,82 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from rag_luciana.settings import settings
+
+
+DEFAULT_TENANT_ID = str(settings.default_tenant_id or "herve")
 
 
 class Base(DeclarativeBase):
     """Base class for all ORM models."""
+
+
+class Tenant(Base):
+    __tablename__ = "tenants"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
+    meta_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        Index("idx_tenant_status", "status", "updated_at"),
+    )
+
+
+class Assistant(Base):
+    __tablename__ = "assistants"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        default=DEFAULT_TENANT_ID,
+        server_default=text(f"'{DEFAULT_TENANT_ID}'"),
+    )
+    assistant_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    character_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    label: Mapped[str] = mapped_column(String(128), nullable=False, default="Assistant")
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
+    meta_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "assistant_id", name="uq_tenant_assistant"),
+        UniqueConstraint("character_id", name="uq_assistant_character"),
+        Index("idx_assistant_tenant_status", "tenant_id", "status", "updated_at"),
+        Index("idx_assistant_character", "character_id"),
+    )
 
 
 # ─────────────────────────────────────────────────────────
@@ -100,6 +170,12 @@ class UserAgentRelation(Base):
     __tablename__ = "user_agent_relations"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        default=DEFAULT_TENANT_ID,
+        server_default=text(f"'{DEFAULT_TENANT_ID}'"),
+    )
     user_id: Mapped[str] = mapped_column(String(64), nullable=False)
     character_id: Mapped[str] = mapped_column(String(64), nullable=False)
     version: Mapped[str] = mapped_column(String(16), nullable=False, default="1.0")
@@ -123,6 +199,8 @@ class UserAgentRelation(Base):
         UniqueConstraint("user_id", "character_id", name="uq_user_agent_relation"),
         Index("idx_uar_user", "user_id", "updated_at"),
         Index("idx_uar_character", "character_id", "updated_at"),
+        Index("idx_uar_tenant_character", "tenant_id", "character_id", "updated_at"),
+        Index("idx_uar_tenant_user", "tenant_id", "user_id", "updated_at"),
     )
 
 class Conversation(Base):
@@ -130,6 +208,12 @@ class Conversation(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     conversation_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    tenant_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        default=DEFAULT_TENANT_ID,
+        server_default=text(f"'{DEFAULT_TENANT_ID}'"),
+    )
     character_id: Mapped[str] = mapped_column(String(64), nullable=False)
     user_id: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
@@ -149,6 +233,8 @@ class Conversation(Base):
         Index("idx_conv_user_char", "user_id", "character_id", "updated_at"),
         Index("idx_conv_char", "character_id", "updated_at"),
         Index("idx_conv_status", "status", "updated_at"),
+        Index("idx_conv_tenant_user_char", "tenant_id", "user_id", "character_id", "updated_at"),
+        Index("idx_conv_tenant_status", "tenant_id", "status", "updated_at"),
     )
 
 
@@ -163,6 +249,12 @@ class Message(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     message_id: Mapped[str] = mapped_column(String(36), unique=True, nullable=False)
     conversation_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    tenant_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        default=DEFAULT_TENANT_ID,
+        server_default=text(f"'{DEFAULT_TENANT_ID}'"),
+    )
     character_id: Mapped[str] = mapped_column(String(64), nullable=False)
     user_id: Mapped[str] = mapped_column(String(64), nullable=False)
 
@@ -180,6 +272,7 @@ class Message(Base):
         ),
         Index("idx_msg_conv_ts", "character_id", "conversation_id", "ts"),
         Index("idx_msg_user", "user_id", "character_id", "ts"),
+        Index("idx_msg_tenant_conv_ts", "tenant_id", "character_id", "conversation_id", "ts"),
     )
 
 
@@ -194,6 +287,12 @@ class Snapshot(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     snapshot_id: Mapped[str] = mapped_column(String(36), unique=True, nullable=False)
     conversation_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    tenant_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        default=DEFAULT_TENANT_ID,
+        server_default=text(f"'{DEFAULT_TENANT_ID}'"),
+    )
     character_id: Mapped[str] = mapped_column(String(64), nullable=False)
     user_id: Mapped[str] = mapped_column(String(64), nullable=False)
 
@@ -207,6 +306,7 @@ class Snapshot(Base):
     __table_args__ = (
         Index("idx_snap_conv_turn", "character_id", "conversation_id", "turn_index"),
         Index("idx_snap_user_char", "user_id", "character_id", "ts"),
+        Index("idx_snap_tenant_conv_turn", "tenant_id", "character_id", "conversation_id", "turn_index"),
     )
 
 
@@ -220,6 +320,12 @@ class Chunk(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     chunk_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    tenant_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        default=DEFAULT_TENANT_ID,
+        server_default=text(f"'{DEFAULT_TENANT_ID}'"),
+    )
     character_id: Mapped[str] = mapped_column(String(64), nullable=False)
 
     scope: Mapped[str] = mapped_column(String(16), nullable=False)  # global / private
@@ -248,6 +354,9 @@ class Chunk(Base):
         Index("idx_chunk_scope", "character_id", "scope", "created_at"),
         Index("idx_chunk_private", "character_id", "user_id", "created_at"),
         Index("idx_chunk_text_hash", "character_id", "text_hash"),
+        Index("idx_chunk_tenant_doc", "tenant_id", "character_id", "doc_id", "doc_version"),
+        Index("idx_chunk_tenant_scope", "tenant_id", "character_id", "scope", "created_at"),
+        Index("idx_chunk_tenant_private", "tenant_id", "character_id", "user_id", "created_at"),
     )
 
 
@@ -261,6 +370,12 @@ class IngestionRun(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     run_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    tenant_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        default=DEFAULT_TENANT_ID,
+        server_default=text(f"'{DEFAULT_TENANT_ID}'"),
+    )
     character_id: Mapped[str] = mapped_column(String(64), nullable=False)
 
     scope: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -283,6 +398,8 @@ class IngestionRun(Base):
         Index("idx_run_status", "character_id", "status"),
         Index("idx_run_started", "character_id", "started_at"),
         Index("idx_run_private", "character_id", "user_id", "started_at"),
+        Index("idx_run_tenant_status", "tenant_id", "character_id", "status"),
+        Index("idx_run_tenant_started", "tenant_id", "character_id", "started_at"),
     )
 
 
@@ -341,6 +458,12 @@ class UserGiftHistory(Base):
     __tablename__ = "user_gift_history"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        default=DEFAULT_TENANT_ID,
+        server_default=text(f"'{DEFAULT_TENANT_ID}'"),
+    )
     user_id: Mapped[str] = mapped_column(String(64), nullable=False)
     character_id: Mapped[str] = mapped_column(String(64), nullable=False)
     gift_id: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -351,5 +474,6 @@ class UserGiftHistory(Base):
     __table_args__ = (
         Index("idx_gift_history_user", "user_id", "purchased_at"),
         Index("idx_gift_history_user_char", "user_id", "character_id", "purchased_at"),
+        Index("idx_gift_history_tenant_user_char", "tenant_id", "user_id", "character_id", "purchased_at"),
     )
 

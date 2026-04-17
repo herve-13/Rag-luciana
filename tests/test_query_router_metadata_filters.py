@@ -17,7 +17,7 @@ async def test_query_router_forwards_metadata_filters(monkeypatch):
     monkeypatch.setattr(query_router, "retrieve", _fake_retrieve)
 
     req = QueryRequest(
-        character_id="luciana",
+        assistant_id="luciana",
         user_id="herve",
         query="florence",
         top_k=4,
@@ -36,6 +36,9 @@ async def test_query_router_forwards_metadata_filters(monkeypatch):
     resp = await query_router.query(req)
 
     assert resp.results == []
+    assert resp.tenant_id == "herve"
+    assert resp.assistant_id == "luciana"
+    assert recorded["tenant_id"] == "herve"
     assert recorded["filters"] == {
         "kind": ["atomic_memory"],
         "owner": "assistant",
@@ -57,7 +60,7 @@ async def test_query_router_forwards_simple_filters(monkeypatch):
     monkeypatch.setattr(query_router, "retrieve", _fake_retrieve)
 
     req = QueryRequest(
-        character_id="luciana",
+        assistant_id="luciana",
         user_id="herve",
         query="qui est ton pere",
         top_k=4,
@@ -74,6 +77,9 @@ async def test_query_router_forwards_simple_filters(monkeypatch):
     resp = await query_router.query(req)
 
     assert resp.results == []
+    assert resp.tenant_id == "herve"
+    assert resp.assistant_id == "luciana"
+    assert recorded["tenant_id"] == "herve"
     assert recorded["filters"] == {
         "kind": ["simple_memory"],
         "bucket": ["persona"],
@@ -95,7 +101,7 @@ async def test_query_router_forwards_sparse_query(monkeypatch):
     monkeypatch.setattr(query_router, "retrieve", _fake_retrieve)
 
     req = QueryRequest(
-        character_id="luciana",
+        assistant_id="luciana",
         user_id="herve",
         query="type d'ingenierie etudie par Matteo",
         top_k=4,
@@ -106,6 +112,9 @@ async def test_query_router_forwards_sparse_query(monkeypatch):
     resp = await query_router.query(req)
 
     assert resp.results == []
+    assert resp.tenant_id == "herve"
+    assert resp.assistant_id == "luciana"
+    assert recorded["tenant_id"] == "herve"
     assert recorded["sparse_query"] == {
         "terms": [
             {"term": "ingenierie", "weight": 1.0},
@@ -133,7 +142,7 @@ async def test_query_router_returns_display_score_fields(monkeypatch):
     monkeypatch.setattr(query_router, "retrieve", _fake_retrieve)
 
     req = QueryRequest(
-        character_id="luciana",
+        assistant_id="luciana",
         user_id="herve",
         query="memoire",
         top_k=1,
@@ -142,6 +151,8 @@ async def test_query_router_returns_display_score_fields(monkeypatch):
 
     resp = await query_router.query(req)
 
+    assert resp.tenant_id == "herve"
+    assert resp.assistant_id == "luciana"
     assert resp.results[0].score_source == "hybrid_rrf"
     assert resp.results[0].display_score == 84
     assert resp.results[0].display_band == "fort"

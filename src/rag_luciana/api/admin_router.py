@@ -9,6 +9,10 @@ from fastapi import APIRouter, HTTPException, Query, status
 
 from rag_luciana.api.deps import AdminAuth, DbSession
 from rag_luciana.api.schemas import (
+    AssistantListResponse,
+    AssistantResponse,
+    AssistantCreate,
+    AssistantUpdate,
     CharacterCreate,
     CharacterListResponse,
     CharacterResponse,
@@ -33,16 +37,222 @@ from rag_luciana.api.schemas import (
     MediaAssetUpsertRequest,
     MediaPickRequest,
     MediaPickResponse,
+    RegistrySyncResponse,
+    TenantCreate,
+    TenantListResponse,
+    TenantResponse,
+    TenantUpdate,
     VectorDeleteRequest,
     VectorDeleteResponse,
 )
 from rag_luciana.clients.qdrant_client import delete_by_filter
 from rag_luciana.db import repo
 from rag_luciana.logging import get_logger
+from rag_luciana.settings import settings
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[AdminAuth])
+
+
+def _resolve_assistant_identifier(
+    *,
+    assistant_id: str | None = None,
+    character_id: str | None = None,
+    agent_id: str | None = None,
+    required: bool = False,
+) -> str | None:
+    values = [
+        str(assistant_id or "").strip(),
+        str(character_id or "").strip(),
+        str(agent_id or "").strip(),
+    ]
+    resolved_values = [value for value in values if value]
+    if len(set(resolved_values)) > 1:
+        raise HTTPException(
+            status_code=400,
+            detail="assistant_id, character_id and agent_id mismatch.",
+        )
+    if resolved_values:
+        return resolved_values[0]
+    if required:
+        raise HTTPException(status_code=400, detail="assistant_id is required.")
+    return None
+
+
+def _resolve_tenant_identifier(tenant_id: str | None = None) -> str:
+    resolved = str(tenant_id or settings.default_tenant_id or "").strip()
+    if not resolved:
+        raise HTTPException(status_code=400, detail="tenant_id is required.")
+    return resolved
+
+
+@router.post(
+    "/tenants",
+    response_model=TenantResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_tenant(body: TenantCreate, db: DbSession):
+    existing = await repo.get_tenant(db, body.tenant_id)
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Tenant '{body.tenant_id}' already exists.",
+        )
+    return await repo.create_tenant(
+        db,
+        tenant_id=body.tenant_id,
+        name=body.name,
+        description=body.description,
+        status=body.status,
+        meta_json=body.meta_json,
+    )
+
+
+@router.get("/tenants", response_model=TenantListResponse)
+async def list_tenants(
+    db: DbSession,
+    status_filter: str | None = Query(None, alias="status"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    items, total = await repo.list_tenants(
+        db,
+        status=status_filter,
+        limit=limit,
+        offset=offset,
+    )
+    return TenantListResponse(items=items, total=total, limit=limit, offset=offset)
+
+
+@router.get("/tenants/{tenant_id}", response_model=TenantResponse)
+async def get_tenant(tenant_id: str, db: DbSession):
+    obj = await repo.get_tenant(db, tenant_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="Tenant not found.")
+    return obj
+
+
+@router.patch("/tenants/{tenant_id}", response_model=TenantResponse)
+async def update_tenant(
+    tenant_id: str,
+    body: TenantUpdate,
+    db: DbSession,
+):
+    fields = body.model_dump(exclude_unset=True)
+    if not fields:
+        raise HTTPException(status_code=400, detail="No fields to update.")
+    obj = await repo.update_tenant(db, tenant_id, **fields)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="Tenant not found.")
+    return obj
+
+
+@router.get("/assistants", response_model=AssistantListResponse)
+async def list_assistants(
+    db: DbSession,
+    tenant_id: str | None = Query(None),
+    status_filter: str | None = Query(None, alias="status"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    resolved_tenant_id = _resolve_tenant_identifier(tenant_id)
+    items, total = await repo.list_assistants(
+        db,
+        tenant_id=resolved_tenant_id,
+        status=status_filter,
+        limit=limit,
+        offset=offset,
+    )
+    return AssistantListResponse(items=items, total=total, limit=limit, offset=offset)
+
+
+@router.post(
+    "/assistants",
+    response_model=AssistantResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_assistant(body: AssistantCreate, db: DbSession):
+    existing = await repo.get_assistant(
+        db,
+        tenant_id=body.tenant_id,
+        assistant_id=body.assistant_id,
+    )
+    if existing is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Assistant '{body.assistant_id}' already exists.",
+        )
+    return await repo.upsert_assistant(
+        db,
+        tenant_id=body.tenant_id,
+        assistant_id=body.assistant_id,
+        character_id=None,
+        name=body.name,
+        description=body.description,
+        status=body.status,
+        meta_json=body.meta_json,
+    )
+
+
+@router.get(
+    "/tenants/{tenant_id}/assistants/{assistant_id}",
+    response_model=AssistantResponse,
+)
+async def get_assistant(
+    tenant_id: str,
+    assistant_id: str,
+    db: DbSession,
+):
+    resolved_tenant_id = _resolve_tenant_identifier(tenant_id)
+    obj = await repo.get_assistant(
+        db,
+        tenant_id=resolved_tenant_id,
+        assistant_id=assistant_id,
+    )
+    if obj is None:
+        raise HTTPException(status_code=404, detail="Assistant not found.")
+    return obj
+
+
+@router.patch(
+    "/tenants/{tenant_id}/assistants/{assistant_id}",
+    response_model=AssistantResponse,
+)
+async def update_assistant(
+    tenant_id: str,
+    assistant_id: str,
+    body: AssistantUpdate,
+    db: DbSession,
+):
+    fields = body.model_dump(exclude_unset=True)
+    if not fields:
+        raise HTTPException(status_code=400, detail="No fields to update.")
+    obj = await repo.update_assistant(
+        db,
+        tenant_id=_resolve_tenant_identifier(tenant_id),
+        assistant_id=assistant_id,
+        **fields,
+    )
+    if obj is None:
+        raise HTTPException(status_code=404, detail="Assistant not found.")
+    return obj
+
+
+@router.post(
+    "/assistants/sync-from-characters",
+    response_model=RegistrySyncResponse,
+)
+async def sync_assistants_from_characters(
+    db: DbSession,
+    tenant_id: str | None = Query(None),
+):
+    resolved_tenant_id = _resolve_tenant_identifier(tenant_id)
+    result = await repo.sync_assistant_registry_from_characters(
+        db,
+        tenant_id=resolved_tenant_id,
+    )
+    return RegistrySyncResponse(**result)
 
 
 # ═════════════════════════════════════════════════════════
@@ -68,6 +278,11 @@ async def create_character(body: CharacterCreate, db: DbSession):
         name=body.name,
         description=body.description,
         meta_json=body.meta_json,
+    )
+    await repo.sync_assistant_from_character(
+        db,
+        tenant_id=settings.default_tenant_id,
+        character=obj,
     )
     return obj
 
@@ -103,6 +318,11 @@ async def update_character(
     obj = await repo.update_character(db, character_id, **fields)
     if obj is None:
         raise HTTPException(status_code=404, detail="Character not found.")
+    await repo.sync_assistant_from_character(
+        db,
+        tenant_id=settings.default_tenant_id,
+        character=obj,
+    )
     return obj
 
 
@@ -113,6 +333,11 @@ async def delete_character(character_id: str, db: DbSession):
     ok = await repo.soft_delete_character(db, character_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Character not found.")
+    await repo.soft_delete_assistant(
+        db,
+        tenant_id=settings.default_tenant_id,
+        assistant_id=character_id,
+    )
 
 
 # ═════════════════════════════════════════════════════════
@@ -188,9 +413,12 @@ async def delete_user(user_id: str, db: DbSession):
 
 
 def _relation_row_to_response(row) -> UserAgentRelationResponse:
+    resolved_assistant_id = str(getattr(row, "assistant_id", None) or row.character_id)
     return UserAgentRelationResponse(
         user_id=row.user_id,
-        agent_id=row.character_id,
+        tenant_id=getattr(row, "tenant_id", None),
+        assistant_id=resolved_assistant_id,
+        agent_id=resolved_assistant_id,
         version=row.version,
         relation_state=row.relation_state_json,
         interaction_stats=row.interaction_stats_json,
@@ -218,6 +446,7 @@ async def upsert_relation(body: UserAgentRelationUpsert, db: DbSession):
 
     obj = await repo.upsert_user_agent_relation(
         db,
+        tenant_id=body.tenant_id,
         user_id=body.user_id,
         character_id=body.agent_id,
         version=body.version,
@@ -232,15 +461,24 @@ async def upsert_relation(body: UserAgentRelationUpsert, db: DbSession):
 @router.get("/relations", response_model=UserAgentRelationListResponse)
 async def list_relations(
     db: DbSession,
+    tenant_id: str | None = Query(None),
     user_id: str | None = Query(None),
+    assistant_id: str | None = Query(None),
     agent_id: str | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
+    resolved_tenant_id = _resolve_tenant_identifier(tenant_id)
+    resolved_assistant_id = _resolve_assistant_identifier(
+        assistant_id=assistant_id,
+        agent_id=agent_id,
+        required=False,
+    )
     items, total = await repo.list_user_agent_relations(
         db,
+        tenant_id=resolved_tenant_id,
         user_id=user_id,
-        character_id=agent_id,
+        character_id=resolved_assistant_id,
         limit=limit,
         offset=offset,
     )
@@ -256,11 +494,28 @@ async def list_relations(
     "/relations/{user_id}/{agent_id}",
     response_model=UserAgentRelationResponse,
 )
-async def get_relation(user_id: str, agent_id: str, db: DbSession):
+@router.get(
+    "/relations/{user_id}/assistants/{assistant_id}",
+    response_model=UserAgentRelationResponse,
+)
+async def get_relation(
+    user_id: str,
+    db: DbSession,
+    tenant_id: str | None = Query(None),
+    agent_id: str | None = None,
+    assistant_id: str | None = None,
+):
+    resolved_tenant_id = _resolve_tenant_identifier(tenant_id)
+    resolved_assistant_id = _resolve_assistant_identifier(
+        assistant_id=assistant_id,
+        agent_id=agent_id,
+        required=True,
+    )
     obj = await repo.get_user_agent_relation(
         db,
+        tenant_id=resolved_tenant_id,
         user_id=user_id,
-        character_id=agent_id,
+        character_id=resolved_assistant_id,
     )
     if obj is None:
         raise HTTPException(status_code=404, detail="Relation not found.")
@@ -272,6 +527,8 @@ async def get_relation(user_id: str, agent_id: str, db: DbSession):
 @router.get("/conversations", response_model=ConversationListResponse)
 async def list_conversations(
     db: DbSession,
+    tenant_id: str | None = Query(None),
+    assistant_id: str | None = Query(None),
     character_id: str | None = Query(None),
     user_id: str | None = Query(None),
     status_filter: str | None = Query(None, alias="status"),
@@ -280,9 +537,16 @@ async def list_conversations(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
+    resolved_tenant_id = _resolve_tenant_identifier(tenant_id)
+    resolved_assistant_id = _resolve_assistant_identifier(
+        assistant_id=assistant_id,
+        character_id=character_id,
+        required=False,
+    )
     items, total = await repo.list_conversations(
         db,
-        character_id=character_id,
+        tenant_id=resolved_tenant_id,
+        character_id=resolved_assistant_id,
         user_id=user_id,
         status=status_filter,
         updated_after=updated_after,
@@ -304,6 +568,7 @@ async def upsert_conversation(body: ConversationUpsertRequest, db: DbSession):
     obj = await repo.upsert_conversation(
         db,
         conversation_id=body.conversation_id,
+        tenant_id=body.tenant_id,
         character_id=body.character_id,
         user_id=body.user_id,
         status=body.status,
@@ -315,8 +580,16 @@ async def upsert_conversation(body: ConversationUpsertRequest, db: DbSession):
 @router.get(
     "/conversations/{conversation_id}", response_model=ConversationResponse
 )
-async def get_conversation(conversation_id: str, db: DbSession):
-    obj = await repo.get_conversation(db, conversation_id)
+async def get_conversation(
+    conversation_id: str,
+    db: DbSession,
+    tenant_id: str | None = Query(None),
+):
+    obj = await repo.get_conversation(
+        db,
+        conversation_id,
+        tenant_id=_resolve_tenant_identifier(tenant_id),
+    )
     if obj is None:
         raise HTTPException(status_code=404, detail="Conversation not found.")
     return obj
@@ -329,17 +602,24 @@ async def get_conversation(conversation_id: str, db: DbSession):
 async def get_conversation_messages(
     conversation_id: str,
     db: DbSession,
+    tenant_id: str | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
+    resolved_tenant_id = _resolve_tenant_identifier(tenant_id)
     # Verify conversation exists
-    conv = await repo.get_conversation(db, conversation_id)
+    conv = await repo.get_conversation(
+        db,
+        conversation_id,
+        tenant_id=resolved_tenant_id,
+    )
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found.")
 
     items, total = await repo.list_messages(
         db,
         conversation_id,
+        resolved_tenant_id,
         conv.character_id,
         limit=limit,
         offset=offset,
@@ -366,12 +646,16 @@ async def append_messages(
         )
 
     conv = await repo.get_conversation(
-        db, conversation_id, body.character_id
+        db,
+        conversation_id,
+        tenant_id=body.tenant_id,
+        character_id=body.character_id,
     )
     if conv is None:
         conv = await repo.upsert_conversation(
             db,
             conversation_id=conversation_id,
+            tenant_id=body.tenant_id,
             character_id=body.character_id,
             user_id=body.user_id,
             status="active",
@@ -386,6 +670,7 @@ async def append_messages(
     last_turn = await repo.get_last_turn_index(
         db,
         conversation_id=conversation_id,
+        tenant_id=body.tenant_id,
         character_id=body.character_id,
     )
     created_items: list[MessageResponse] = []
@@ -396,6 +681,7 @@ async def append_messages(
             db,
             message_id=str(uuid4()),
             conversation_id=conversation_id,
+            tenant_id=body.tenant_id,
             character_id=body.character_id,
             user_id=body.user_id,
             turn_index=turn,
@@ -411,6 +697,7 @@ async def append_messages(
     await repo.upsert_conversation(
         db,
         conversation_id=conversation_id,
+        tenant_id=body.tenant_id,
         character_id=body.character_id,
         user_id=body.user_id,
         status="active",
@@ -432,16 +719,23 @@ async def append_messages(
 async def get_conversation_snapshots(
     conversation_id: str,
     db: DbSession,
+    tenant_id: str | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
-    conv = await repo.get_conversation(db, conversation_id)
+    resolved_tenant_id = _resolve_tenant_identifier(tenant_id)
+    conv = await repo.get_conversation(
+        db,
+        conversation_id,
+        tenant_id=resolved_tenant_id,
+    )
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found.")
 
     items, total = await repo.list_snapshots(
         db,
         conversation_id,
+        resolved_tenant_id,
         conv.character_id,
         limit=limit,
         offset=offset,
@@ -455,8 +749,17 @@ async def get_conversation_snapshots(
     "/conversations/{conversation_id}/close",
     response_model=ConversationResponse,
 )
-async def close_conversation(conversation_id: str, db: DbSession):
-    obj = await repo.set_conversation_status(db, conversation_id, "closed")
+async def close_conversation(
+    conversation_id: str,
+    db: DbSession,
+    tenant_id: str | None = Query(None),
+):
+    obj = await repo.set_conversation_status(
+        db,
+        conversation_id,
+        "closed",
+        tenant_id=_resolve_tenant_identifier(tenant_id),
+    )
     if obj is None:
         raise HTTPException(status_code=404, detail="Conversation not found.")
     return obj
@@ -466,8 +769,17 @@ async def close_conversation(conversation_id: str, db: DbSession):
     "/conversations/{conversation_id}/open",
     response_model=ConversationResponse,
 )
-async def open_conversation(conversation_id: str, db: DbSession):
-    obj = await repo.set_conversation_status(db, conversation_id, "active")
+async def open_conversation(
+    conversation_id: str,
+    db: DbSession,
+    tenant_id: str | None = Query(None),
+):
+    obj = await repo.set_conversation_status(
+        db,
+        conversation_id,
+        "active",
+        tenant_id=_resolve_tenant_identifier(tenant_id),
+    )
     if obj is None:
         raise HTTPException(status_code=404, detail="Conversation not found.")
     return obj
@@ -477,19 +789,28 @@ async def open_conversation(conversation_id: str, db: DbSession):
     "/conversations/{conversation_id}",
     status_code=status.HTTP_204_NO_CONTENT,
 )
-async def purge_conversation(conversation_id: str, db: DbSession):
+async def purge_conversation(
+    conversation_id: str,
+    db: DbSession,
+    tenant_id: str | None = Query(None),
+):
     """Hard-delete conversation + messages + snapshots + vector memory.
 
     This is a destructive operation. The conversation and all associated
     data (including private embeddings in Qdrant) are permanently removed.
     """
-    info = await repo.purge_conversation(db, conversation_id)
+    info = await repo.purge_conversation(
+        db,
+        conversation_id,
+        tenant_id=_resolve_tenant_identifier(tenant_id),
+    )
     if info is None:
         raise HTTPException(status_code=404, detail="Conversation not found.")
 
     # ── Purge vectors in Qdrant (private collection) ─────
     try:
         delete_by_filter(
+            tenant_id=info["tenant_id"],
             character_id=info["character_id"],
             scope="private",
             filters={
@@ -514,14 +835,23 @@ async def purge_conversation(conversation_id: str, db: DbSession):
 @router.get("/media/assets", response_model=MediaAssetListResponse)
 async def list_media_assets(
     db: DbSession,
-    character_id: str = Query(..., min_length=1),
+    tenant_id: str | None = Query(None),
+    assistant_id: str | None = Query(None, min_length=1),
+    character_id: str | None = Query(None, min_length=1),
     active_only: bool = Query(True),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
+    resolved_tenant_id = _resolve_tenant_identifier(tenant_id)
+    resolved_assistant_id = _resolve_assistant_identifier(
+        assistant_id=assistant_id,
+        character_id=character_id,
+        required=True,
+    )
     items, total = await repo.list_media_assets(
         db,
-        character_id=character_id,
+        tenant_id=resolved_tenant_id,
+        character_id=resolved_assistant_id,
         active_only=active_only,
         limit=limit,
         offset=offset,
@@ -537,6 +867,7 @@ async def list_media_assets(
 async def upsert_media_asset(body: MediaAssetUpsertRequest, db: DbSession):
     obj = await repo.upsert_media_asset(
         db,
+        tenant_id=body.tenant_id,
         character_id=body.character_id,
         file_url=body.file_url,
         title=body.title,
@@ -558,6 +889,7 @@ async def pick_media_asset(body: MediaPickRequest, db: DbSession):
     item, source = await repo.pick_media_asset_for_user(
         db,
         user_id=body.user_id,
+        tenant_id=body.tenant_id,
         character_id=body.character_id,
         allow_recycle=body.allow_recycle,
         max_relationship_level=body.max_relationship_level,
@@ -570,8 +902,16 @@ async def pick_media_asset(body: MediaPickRequest, db: DbSession):
 
 
 @router.delete("/media/assets/{asset_id}", response_model=MediaAssetResponse)
-async def delete_media_asset(asset_id: int, db: DbSession):
-    obj = await repo.delete_media_asset(db, asset_id=asset_id)
+async def delete_media_asset(
+    asset_id: int,
+    db: DbSession,
+    tenant_id: str | None = Query(None),
+):
+    obj = await repo.delete_media_asset(
+        db,
+        tenant_id=_resolve_tenant_identifier(tenant_id),
+        asset_id=asset_id,
+    )
     if obj is None:
         raise HTTPException(status_code=404, detail="Media asset not found.")
     return MediaAssetResponse(**obj)
@@ -581,28 +921,37 @@ async def delete_media_asset(asset_id: int, db: DbSession):
 async def delete_vectors(body: VectorDeleteRequest):
     if not isinstance(body.filters, dict) or not body.filters:
         raise HTTPException(status_code=400, detail="filters must be a non-empty object.")
+    resolved_assistant_id = _resolve_assistant_identifier(
+        assistant_id=body.assistant_id,
+        character_id=body.character_id,
+        required=True,
+    )
     try:
         delete_by_filter(
-            character_id=body.character_id,
+            tenant_id=body.tenant_id,
+            character_id=resolved_assistant_id,
             scope=body.scope,
             filters=body.filters,
         )
         logger.info(
             "vectors_deleted_by_filter",
-            character_id=body.character_id,
+            assistant_id=resolved_assistant_id,
+            character_id=resolved_assistant_id,
             scope=body.scope,
             filters=body.filters,
         )
         return VectorDeleteResponse(
             status="ok",
-            character_id=body.character_id,
+            assistant_id=resolved_assistant_id,
+            character_id=resolved_assistant_id,
             scope=body.scope,
             filters=body.filters,
         )
     except Exception:
         logger.error(
             "vector_delete_by_filter_failed",
-            character_id=body.character_id,
+            assistant_id=resolved_assistant_id,
+            character_id=resolved_assistant_id,
             scope=body.scope,
             filters=body.filters,
             exc_info=True,

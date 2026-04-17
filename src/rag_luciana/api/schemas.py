@@ -7,6 +7,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
+from rag_luciana.settings import settings
+
 
 # ─────────────────────────────────────────────────────────
 # Pagination
@@ -17,6 +19,116 @@ class PaginatedResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+def _resolve_tenant_id(tenant_id: str | None) -> str:
+    resolved = str(tenant_id or settings.default_tenant_id or "").strip()
+    if not resolved:
+        raise ValueError("tenant_id is required")
+    return resolved
+
+
+def _resolve_assistant_id(assistant_id: str | None) -> str:
+    resolved = str(assistant_id or "").strip()
+    if not resolved:
+        raise ValueError("assistant_id is required")
+    return resolved
+
+
+def _resolve_assistant_character_ids(
+    assistant_id: str | None,
+    character_id: str | None,
+) -> tuple[str, str]:
+    resolved = _resolve_assistant_id(assistant_id or character_id)
+    return resolved, resolved
+
+
+def _resolve_assistant_agent_ids(
+    assistant_id: str | None,
+    agent_id: str | None,
+) -> tuple[str, str]:
+    resolved = _resolve_assistant_id(assistant_id or agent_id)
+    return resolved, resolved
+
+
+class TenantCreate(BaseModel):
+    tenant_id: str = Field(..., min_length=1, max_length=64)
+    name: str = Field(..., min_length=1, max_length=128)
+    description: str | None = None
+    status: str = Field("draft/review", pattern=r"^(draft/review|active|paused|suspended)$")
+    meta_json: dict[str, Any] | None = None
+
+
+class TenantUpdate(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=128)
+    description: str | None = None
+    status: str | None = Field(None, pattern=r"^(draft/review|active|paused|suspended)$")
+    meta_json: dict[str, Any] | None = None
+
+
+class TenantResponse(BaseModel):
+    tenant_id: str
+    name: str
+    description: str | None = None
+    status: str
+    meta_json: dict[str, Any] | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class TenantListResponse(PaginatedResponse):
+    items: list[TenantResponse]
+
+
+class AssistantResponse(BaseModel):
+    tenant_id: str | None = None
+    assistant_id: str
+    name: str
+    description: str | None = None
+    status: str
+    meta_json: dict[str, Any] | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+    @model_validator(mode="after")
+    def normalize_scope(self) -> "AssistantResponse":
+        self.tenant_id = _resolve_tenant_id(self.tenant_id)
+        return self
+
+
+class AssistantListResponse(PaginatedResponse):
+    items: list[AssistantResponse]
+
+
+class AssistantCreate(BaseModel):
+    tenant_id: str | None = Field(None, min_length=1, max_length=64)
+    assistant_id: str = Field(..., min_length=1, max_length=64)
+    name: str = Field(..., min_length=1, max_length=128)
+    description: str | None = None
+    status: str = Field("active", pattern=r"^(active|paused|suspended)$")
+    meta_json: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def validate_scope(self) -> "AssistantCreate":
+        self.tenant_id = _resolve_tenant_id(self.tenant_id)
+        self.assistant_id = _resolve_assistant_id(self.assistant_id)
+        return self
+
+
+class AssistantUpdate(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=128)
+    description: str | None = None
+    status: str | None = Field(None, pattern=r"^(active|paused|suspended)$")
+    meta_json: dict[str, Any] | None = None
+
+
+class RegistrySyncResponse(BaseModel):
+    tenant_id: str
+    synced_count: int
 
 
 # ─────────────────────────────────────────────────────────
@@ -93,6 +205,8 @@ class UserListResponse(PaginatedResponse):
 
 class ConversationResponse(BaseModel):
     conversation_id: str
+    tenant_id: str | None = None
+    assistant_id: str | None = None
     character_id: str
     user_id: str
     status: str
@@ -102,6 +216,17 @@ class ConversationResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
+    @model_validator(mode="after")
+    def populate_assistant_id(self) -> "ConversationResponse":
+        self.tenant_id = _resolve_tenant_id(self.tenant_id)
+        assistant_id, character_id = _resolve_assistant_character_ids(
+            self.assistant_id,
+            self.character_id,
+        )
+        self.assistant_id = assistant_id
+        self.character_id = character_id
+        return self
+
 
 class ConversationListResponse(PaginatedResponse):
     items: list[ConversationResponse]
@@ -109,10 +234,23 @@ class ConversationListResponse(PaginatedResponse):
 
 class ConversationUpsertRequest(BaseModel):
     conversation_id: str = Field(..., min_length=1, max_length=36)
-    character_id: str = Field(..., min_length=1, max_length=64)
+    tenant_id: str | None = Field(None, min_length=1, max_length=64)
+    assistant_id: str | None = Field(None, min_length=1, max_length=64)
+    character_id: str | None = Field(None, min_length=1, max_length=64)
     user_id: str = Field(..., min_length=1, max_length=64)
     status: str = Field("active", pattern=r"^(active|closed)$")
     meta_json: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def validate_assistant_identifier(self) -> "ConversationUpsertRequest":
+        self.tenant_id = _resolve_tenant_id(self.tenant_id)
+        assistant_id, character_id = _resolve_assistant_character_ids(
+            self.assistant_id,
+            self.character_id,
+        )
+        self.assistant_id = assistant_id
+        self.character_id = character_id
+        return self
 
 
 # ─────────────────────────────────────────────────────────
@@ -146,16 +284,31 @@ class RelationMeta(BaseModel):
 
 class UserAgentRelationUpsert(BaseModel):
     user_id: str = Field(..., min_length=1, max_length=64)
-    agent_id: str = Field(..., min_length=1, max_length=64)
+    tenant_id: str | None = Field(None, min_length=1, max_length=64)
+    assistant_id: str | None = Field(None, min_length=1, max_length=64)
+    agent_id: str | None = Field(None, min_length=1, max_length=64)
     version: str = Field("1.0", min_length=1, max_length=16)
     relation_state: RelationState = Field(default_factory=RelationState)
     interaction_stats: InteractionStats = Field(default_factory=InteractionStats)
     flags: RelationFlags = Field(default_factory=RelationFlags)
     meta: RelationMeta | None = None
 
+    @model_validator(mode="after")
+    def validate_assistant_identifier(self) -> "UserAgentRelationUpsert":
+        self.tenant_id = _resolve_tenant_id(self.tenant_id)
+        assistant_id, agent_id = _resolve_assistant_agent_ids(
+            self.assistant_id,
+            self.agent_id,
+        )
+        self.assistant_id = assistant_id
+        self.agent_id = agent_id
+        return self
+
 
 class UserAgentRelationResponse(BaseModel):
     user_id: str
+    tenant_id: str | None = None
+    assistant_id: str | None = None
     agent_id: str
     version: str
     relation_state: RelationState
@@ -164,6 +317,17 @@ class UserAgentRelationResponse(BaseModel):
     meta: RelationMeta
     created_at: datetime
     updated_at: datetime
+
+    @model_validator(mode="after")
+    def populate_assistant_id(self) -> "UserAgentRelationResponse":
+        self.tenant_id = _resolve_tenant_id(self.tenant_id)
+        assistant_id, agent_id = _resolve_assistant_agent_ids(
+            self.assistant_id,
+            self.agent_id,
+        )
+        self.assistant_id = assistant_id
+        self.agent_id = agent_id
+        return self
 
 
 class UserAgentRelationListResponse(PaginatedResponse):
@@ -175,6 +339,8 @@ class UserAgentRelationListResponse(PaginatedResponse):
 class MessageResponse(BaseModel):
     message_id: str
     conversation_id: str
+    tenant_id: str | None = None
+    assistant_id: str | None = None
     character_id: str
     user_id: str
     turn_index: int
@@ -184,6 +350,17 @@ class MessageResponse(BaseModel):
     ts: datetime
 
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="after")
+    def populate_assistant_id(self) -> "MessageResponse":
+        self.tenant_id = _resolve_tenant_id(self.tenant_id)
+        assistant_id, character_id = _resolve_assistant_character_ids(
+            self.assistant_id,
+            self.character_id,
+        )
+        self.assistant_id = assistant_id
+        self.character_id = character_id
+        return self
 
 
 class MessageListResponse(PaginatedResponse):
@@ -199,9 +376,22 @@ class MessageCreateRequest(BaseModel):
 
 class MessageBatchCreateRequest(BaseModel):
     conversation_id: str = Field(..., min_length=1, max_length=36)
-    character_id: str = Field(..., min_length=1, max_length=64)
+    tenant_id: str | None = Field(None, min_length=1, max_length=64)
+    assistant_id: str | None = Field(None, min_length=1, max_length=64)
+    character_id: str | None = Field(None, min_length=1, max_length=64)
     user_id: str = Field(..., min_length=1, max_length=64)
     messages: list[MessageCreateRequest] = Field(default_factory=list, min_length=1)
+
+    @model_validator(mode="after")
+    def validate_assistant_identifier(self) -> "MessageBatchCreateRequest":
+        self.tenant_id = _resolve_tenant_id(self.tenant_id)
+        assistant_id, character_id = _resolve_assistant_character_ids(
+            self.assistant_id,
+            self.character_id,
+        )
+        self.assistant_id = assistant_id
+        self.character_id = character_id
+        return self
 
 
 # ─────────────────────────────────────────────────────────
@@ -212,6 +402,8 @@ class MessageBatchCreateRequest(BaseModel):
 class SnapshotResponse(BaseModel):
     snapshot_id: str
     conversation_id: str
+    tenant_id: str | None = None
+    assistant_id: str | None = None
     character_id: str
     user_id: str
     turn_index: int
@@ -220,6 +412,17 @@ class SnapshotResponse(BaseModel):
     ts: datetime
 
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="after")
+    def populate_assistant_id(self) -> "SnapshotResponse":
+        self.tenant_id = _resolve_tenant_id(self.tenant_id)
+        assistant_id, character_id = _resolve_assistant_character_ids(
+            self.assistant_id,
+            self.character_id,
+        )
+        self.assistant_id = assistant_id
+        self.character_id = character_id
+        return self
 
 
 class SnapshotListResponse(PaginatedResponse):
@@ -251,7 +454,8 @@ class SparseQueryPayload(BaseModel):
 
 
 class QueryRequest(BaseModel):
-    character_id: str = Field(..., min_length=1, max_length=64)
+    tenant_id: str | None = Field(None, min_length=1, max_length=64)
+    assistant_id: str | None = Field(None, min_length=1, max_length=64)
     user_id: str = Field(..., min_length=1, max_length=64)
     conversation_id: str | None = None
     query: str = Field(..., min_length=1)
@@ -260,6 +464,12 @@ class QueryRequest(BaseModel):
     filters: QueryFilters | None = None
     sparse_query: SparseQueryPayload | None = None
     return_text: bool = True
+
+    @model_validator(mode="after")
+    def validate_assistant_identifier(self) -> "QueryRequest":
+        self.tenant_id = _resolve_tenant_id(self.tenant_id)
+        self.assistant_id = _resolve_assistant_id(self.assistant_id)
+        return self
 
 
 class ChunkResult(BaseModel):
@@ -275,7 +485,8 @@ class ChunkResult(BaseModel):
 
 class QueryResponse(BaseModel):
     query_id: str
-    character_id: str
+    tenant_id: str
+    assistant_id: str
     user_id: str
     top_k: int
     results: list[ChunkResult]
@@ -288,7 +499,8 @@ class QueryResponse(BaseModel):
 
 
 class IngestRequest(BaseModel):
-    character_id: str = Field(..., min_length=1, max_length=64)
+    tenant_id: str | None = Field(None, min_length=1, max_length=64)
+    assistant_id: str | None = Field(None, min_length=1, max_length=64)
     scope: str = Field("private", pattern=r"^private$")
     user_id: str | None = Field(None, min_length=1, max_length=64)
     doc_id: str = Field(..., min_length=1, max_length=64)
@@ -308,6 +520,8 @@ class IngestRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_scope_user(self) -> "IngestRequest":
+        self.tenant_id = _resolve_tenant_id(self.tenant_id)
+        self.assistant_id = _resolve_assistant_id(self.assistant_id)
         if self.scope != "private":
             raise ValueError("scope must be private")
         if not self.user_id:
@@ -319,7 +533,8 @@ class IngestRequest(BaseModel):
 
 class IngestResponse(BaseModel):
     run_id: str
-    character_id: str
+    tenant_id: str
+    assistant_id: str
     scope: str
     user_id: str | None = None
     doc_id: str
@@ -344,6 +559,8 @@ class ReadyResponse(BaseModel):
 
 class MediaAssetResponse(BaseModel):
     id: int
+    tenant_id: str | None = None
+    assistant_id: str | None = None
     character_id: str
     file_url: str
     title: str | None = None
@@ -359,13 +576,26 @@ class MediaAssetResponse(BaseModel):
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
+    @model_validator(mode="after")
+    def populate_assistant_id(self) -> "MediaAssetResponse":
+        self.tenant_id = _resolve_tenant_id(self.tenant_id)
+        assistant_id, character_id = _resolve_assistant_character_ids(
+            self.assistant_id,
+            self.character_id,
+        )
+        self.assistant_id = assistant_id
+        self.character_id = character_id
+        return self
+
 
 class MediaAssetListResponse(PaginatedResponse):
     items: list[MediaAssetResponse]
 
 
 class MediaAssetUpsertRequest(BaseModel):
-    character_id: str = Field(..., min_length=1, max_length=64)
+    tenant_id: str | None = Field(None, min_length=1, max_length=64)
+    assistant_id: str | None = Field(None, min_length=1, max_length=64)
+    character_id: str | None = Field(None, min_length=1, max_length=64)
     file_url: str = Field(..., min_length=1, max_length=255)
     title: str | None = Field(None, max_length=128)
     description: str | None = None
@@ -378,10 +608,23 @@ class MediaAssetUpsertRequest(BaseModel):
     sort_order: int = Field(0, ge=0)
     is_active: bool = True
 
+    @model_validator(mode="after")
+    def validate_assistant_identifier(self) -> "MediaAssetUpsertRequest":
+        self.tenant_id = _resolve_tenant_id(self.tenant_id)
+        assistant_id, character_id = _resolve_assistant_character_ids(
+            self.assistant_id,
+            self.character_id,
+        )
+        self.assistant_id = assistant_id
+        self.character_id = character_id
+        return self
+
 
 class MediaPickRequest(BaseModel):
     user_id: str = Field(..., min_length=1, max_length=64)
-    character_id: str = Field(..., min_length=1, max_length=64)
+    tenant_id: str | None = Field(None, min_length=1, max_length=64)
+    assistant_id: str | None = Field(None, min_length=1, max_length=64)
+    character_id: str | None = Field(None, min_length=1, max_length=64)
     allow_recycle: bool = True
     max_relationship_level: int = Field(5, ge=1, le=5)
     max_content_intensity: str = Field(
@@ -390,6 +633,17 @@ class MediaPickRequest(BaseModel):
     )
     media_kind: str | None = Field(None, pattern=r"^(photo|video)$")
 
+    @model_validator(mode="after")
+    def validate_assistant_identifier(self) -> "MediaPickRequest":
+        self.tenant_id = _resolve_tenant_id(self.tenant_id)
+        assistant_id, character_id = _resolve_assistant_character_ids(
+            self.assistant_id,
+            self.character_id,
+        )
+        self.assistant_id = assistant_id
+        self.character_id = character_id
+        return self
+
 
 class MediaPickResponse(BaseModel):
     item: MediaAssetResponse | None = None
@@ -397,14 +651,40 @@ class MediaPickResponse(BaseModel):
 
 
 class VectorDeleteRequest(BaseModel):
-    character_id: str = Field(..., min_length=1, max_length=64)
+    tenant_id: str | None = Field(None, min_length=1, max_length=64)
+    assistant_id: str | None = Field(None, min_length=1, max_length=64)
+    character_id: str | None = Field(None, min_length=1, max_length=64)
     scope: str = Field("private", pattern=r"^(global|private)$")
     filters: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_assistant_identifier(self) -> "VectorDeleteRequest":
+        self.tenant_id = _resolve_tenant_id(self.tenant_id)
+        assistant_id, character_id = _resolve_assistant_character_ids(
+            self.assistant_id,
+            self.character_id,
+        )
+        self.assistant_id = assistant_id
+        self.character_id = character_id
+        return self
 
 
 class VectorDeleteResponse(BaseModel):
     status: str
+    tenant_id: str | None = None
+    assistant_id: str | None = None
     character_id: str
     scope: str
     filters: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def populate_assistant_id(self) -> "VectorDeleteResponse":
+        self.tenant_id = _resolve_tenant_id(self.tenant_id)
+        assistant_id, character_id = _resolve_assistant_character_ids(
+            self.assistant_id,
+            self.character_id,
+        )
+        self.assistant_id = assistant_id
+        self.character_id = character_id
+        return self
 

@@ -56,11 +56,16 @@ def _normalize_sparse_terms_payload(sparse_query: dict | None) -> list[dict[str,
 def _payload_matches_scope(
     payload: dict,
     *,
-    character_id: str,
+    tenant_id: str,
+    assistant_id: str,
     user_id: str,
     conversation_id: str | None,
 ) -> bool:
-    if str(payload.get("character_id") or "").strip() != str(character_id):
+    payload_tenant_id = str(payload.get("tenant_id") or settings.default_tenant_id or "").strip()
+    if payload_tenant_id != str(tenant_id):
+        return False
+    payload_assistant_id = str(payload.get("assistant_id") or "").strip()
+    if payload_assistant_id != str(assistant_id):
         return False
     if str(payload.get("user_id") or "").strip() != str(user_id):
         return False
@@ -139,7 +144,8 @@ def _apply_display_scores(hits: list[ChunkHit]) -> None:
 
 async def retrieve(
     *,
-    character_id: str,
+    tenant_id: str | None = None,
+    assistant_id: str | None = None,
     query: str,
     scope: str = "private",
     user_id: str | None = None,
@@ -150,25 +156,32 @@ async def retrieve(
     return_text: bool = True,
     debug_sink: dict | None = None,
 ) -> list[ChunkHit]:
+    resolved_assistant_id = str(assistant_id or "").strip()
+    if not resolved_assistant_id:
+        raise ValueError("assistant_id is required")
     if scope != "private":
         raise ValueError("scope must be private")
     if user_id is None:
         raise ValueError("user_id is required for scope=private")
+    resolved_tenant_id = str(tenant_id or settings.default_tenant_id or "").strip()
+    if not resolved_tenant_id:
+        raise ValueError("tenant_id is required")
 
     dense_query = await embed_text(query)
     candidate_multiplier = max(1, settings.reranker_candidate_multiplier)
     candidate_k = top_k * candidate_multiplier if reranker_enabled() else top_k
     private_filters: dict = {
         **(filters or {}),
-        "character_id": character_id,
+        "assistant_id": resolved_assistant_id,
         "user_id": user_id,
     }
     if conversation_id:
         private_filters["conversation_id"] = conversation_id
 
     dense_hits = qc.search_vectors(
-        character_id=character_id,
+        assistant_id=resolved_assistant_id,
         scope="private",
+        tenant_id=resolved_tenant_id,
         vector=dense_query,
         limit=candidate_k,
         filters=private_filters,
@@ -210,8 +223,9 @@ async def retrieve(
     sparse_hits = []
     if sparse_embedding is not None:
         sparse_hits = qc.search_sparse_vectors(
-            character_id=character_id,
+            assistant_id=resolved_assistant_id,
             scope="private",
+            tenant_id=resolved_tenant_id,
             indices=sparse_embedding.indices,
             values=sparse_embedding.values,
             limit=candidate_k,
@@ -225,7 +239,8 @@ async def retrieve(
         payload = h.payload or {}
         if not _payload_matches_scope(
             payload,
-            character_id=character_id,
+            tenant_id=resolved_tenant_id,
+            assistant_id=resolved_assistant_id,
             user_id=user_id,
             conversation_id=conversation_id,
         ):
@@ -244,7 +259,8 @@ async def retrieve(
         payload = h.payload or {}
         if not _payload_matches_scope(
             payload,
-            character_id=character_id,
+            tenant_id=resolved_tenant_id,
+            assistant_id=resolved_assistant_id,
             user_id=user_id,
             conversation_id=conversation_id,
         ):
