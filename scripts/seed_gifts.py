@@ -2,8 +2,8 @@
 
 import asyncio
 from sqlalchemy import select
-from rag_luciana.db.session import engine, get_db
-from rag_luciana.db.models import GiftCatalog
+from chatfriends_retrieval.db.session import engine, get_db
+from chatfriends_retrieval.db.models import GiftCatalog
 
 GIFTS = [
     # CUTE
@@ -104,3 +104,4 @@ async def seed():
 
 if __name__ == "__main__":
     asyncio.run(seed())
+

@@ -7,9 +7,9 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from rag_luciana.api import admin_router as admin_module
-from rag_luciana.api.admin_router import router as admin_router
-from rag_luciana.api.deps import _get_db, verify_admin_key
+from chatfriends_retrieval.api import admin_router as admin_module
+from chatfriends_retrieval.api.admin_router import router as admin_router
+from chatfriends_retrieval.api.deps import _get_db, verify_admin_key
 
 
 def _now() -> datetime:
@@ -232,6 +232,52 @@ def test_upsert_media_asset_accepts_assistant_id_in_body(monkeypatch, client: Te
     assert payload["character_id"] == "luciana"
 
 
+def test_upsert_media_asset_accepts_audio_media_kind(monkeypatch, client: TestClient):
+    captured: dict[str, object] = {}
+    now = _now()
+
+    async def fake_upsert_media_asset(db, **kwargs):
+        captured.update(kwargs)
+        return {
+            "id": 8,
+            "tenant_id": kwargs["tenant_id"],
+            "character_id": kwargs["character_id"],
+            "file_url": kwargs["file_url"],
+            "title": kwargs.get("title"),
+            "description": kwargs.get("description"),
+            "required_relationship_level": kwargs.get("required_relationship_level", 1),
+            "content_intensity": kwargs.get("content_intensity", "SOFT"),
+            "purchase_hearts_cost": kwargs.get("purchase_hearts_cost", 0),
+            "relation_gain_bonus": kwargs.get("relation_gain_bonus", 0),
+            "is_purchasable": kwargs.get("is_purchasable", False),
+            "media_kind": kwargs.get("media_kind", "audio"),
+            "sort_order": kwargs.get("sort_order", 0),
+            "is_active": kwargs.get("is_active", True),
+            "created_at": now,
+            "updated_at": now,
+        }
+
+    monkeypatch.setattr(admin_module.repo, "upsert_media_asset", fake_upsert_media_asset)
+
+    response = client.post(
+        "/admin/media/assets",
+        json={
+            "tenant_id": "tenant_ops",
+            "assistant_id": "mozart",
+            "file_url": "source/audio/requiem.mp3",
+            "title": "Requiem",
+            "media_kind": "audio",
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert captured["tenant_id"] == "tenant_ops"
+    assert captured["character_id"] == "mozart"
+    assert captured["media_kind"] == "audio"
+    assert payload["media_kind"] == "audio"
+
+
 def test_delete_vectors_accepts_assistant_id_in_body(monkeypatch, client: TestClient):
     captured: dict[str, object] = {}
 
@@ -259,3 +305,4 @@ def test_delete_vectors_accepts_assistant_id_in_body(monkeypatch, client: TestCl
     assert payload["tenant_id"] == "herve"
     assert payload["assistant_id"] == "luciana"
     assert payload["character_id"] == "luciana"
+

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from rag_luciana.db import repo
+from chatfriends_retrieval.db import repo
 
 
 @pytest.mark.asyncio
@@ -76,3 +76,4 @@ async def test_sync_assistant_registry_bootstraps_from_legacy_ids(monkeypatch):
     assert captured["tenant_id"] == "tenant_ops"
     assert sorted(captured["upserts"]) == ["luciana", "marina"]
     assert result == {"tenant_id": "tenant_ops", "synced_count": 2}
+

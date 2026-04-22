@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from rag_luciana.api.schemas import IngestRequest, QueryRequest
+from chatfriends_retrieval.api.schemas import IngestRequest, MediaAssetUpsertRequest, MediaPickRequest, QueryRequest
 
 
 def test_ingest_request_rejects_global_scope():
@@ -40,7 +40,6 @@ def test_query_request_accepts_sparse_query_terms():
     assert req.sparse_query.terms[0].term == "pere"
     assert req.tenant_id == "herve"
     assert req.assistant_id == "luciana"
-    assert req.character_id == "luciana"
 
 
 def test_ingest_request_accepts_assistant_id_alias():
@@ -54,15 +53,39 @@ def test_ingest_request_accepts_assistant_id_alias():
 
     assert req.tenant_id == "herve"
     assert req.assistant_id == "luciana"
-    assert req.character_id == "luciana"
 
 
-def test_query_request_rejects_mismatched_assistant_and_character_ids():
+def test_query_request_requires_assistant_id():
     with pytest.raises(ValidationError):
         QueryRequest(
-            assistant_id="marina",
-            character_id="luciana",
             user_id="u1",
             query="hello",
             scope="private",
         )
+
+
+def test_media_asset_upsert_request_accepts_audio_media_kind():
+    req = MediaAssetUpsertRequest(
+        assistant_id="mozart",
+        file_url="source/audio/requiem.mp3",
+        media_kind="audio",
+    )
+
+    assert req.tenant_id == "herve"
+    assert req.assistant_id == "mozart"
+    assert req.character_id == "mozart"
+    assert req.media_kind == "audio"
+
+
+def test_media_pick_request_accepts_audio_media_kind():
+    req = MediaPickRequest(
+        tenant_id="herve",
+        assistant_id="mozart",
+        user_id="u1",
+        media_kind="audio",
+    )
+
+    assert req.assistant_id == "mozart"
+    assert req.character_id == "mozart"
+    assert req.media_kind == "audio"
+

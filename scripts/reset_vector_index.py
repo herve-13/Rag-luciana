@@ -14,7 +14,7 @@ from collections.abc import Iterable
 
 from qdrant_client import models
 
-from rag_luciana.clients.qdrant_client import collection_name, get_qdrant_client
+from chatfriends_retrieval.clients.qdrant_client import collection_name, get_qdrant_client
 
 SCOPES = ("global", "private")
 
@@ -107,3 +107,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

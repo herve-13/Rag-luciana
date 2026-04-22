@@ -7,9 +7,9 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from rag_luciana.api import admin_router as admin_module
-from rag_luciana.api.admin_router import router as admin_router
-from rag_luciana.api.deps import _get_db, verify_admin_key
+from chatfriends_retrieval.api import admin_router as admin_module
+from chatfriends_retrieval.api.admin_router import router as admin_router
+from chatfriends_retrieval.api.deps import _get_db, verify_admin_key
 
 
 def _now() -> datetime:
@@ -63,6 +63,51 @@ def test_list_tenants_returns_registry_rows(monkeypatch, client: TestClient):
     assert captured["status"] == "active"
     assert payload["items"][0]["tenant_id"] == "tenant_ops"
     assert payload["items"][0]["name"] == "Tenant Ops"
+
+
+def test_create_tenant_forwards_payload(monkeypatch, client: TestClient):
+    now = _now()
+    captured: dict[str, object] = {}
+
+    async def fake_get_tenant(db, tenant_id: str):
+        captured["lookup_tenant_id"] = tenant_id
+        return None
+
+    async def fake_create_tenant(db, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            tenant_id=kwargs["tenant_id"],
+            label=kwargs["name"],
+            name=kwargs["name"],
+            description=kwargs.get("description"),
+            status=kwargs["status"],
+            meta_json=kwargs.get("meta_json"),
+            created_at=now,
+            updated_at=now,
+        )
+
+    monkeypatch.setattr(admin_module.repo, "get_tenant", fake_get_tenant)
+    monkeypatch.setattr(admin_module.repo, "create_tenant", fake_create_tenant)
+
+    response = client.post(
+        "/admin/tenants",
+        json={
+            "tenant_id": "sportif",
+            "name": "Sportif",
+            "description": "Client Sportif",
+            "status": "active",
+            "meta_json": {"default_assistant_id": "zidane"},
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert captured["lookup_tenant_id"] == "sportif"
+    assert captured["tenant_id"] == "sportif"
+    assert captured["name"] == "Sportif"
+    assert captured["status"] == "active"
+    assert payload["tenant_id"] == "sportif"
+    assert payload["name"] == "Sportif"
 
 
 def test_list_assistants_scoped_by_tenant(monkeypatch, client: TestClient):
@@ -174,3 +219,4 @@ def test_create_character_syncs_assistant_registry(monkeypatch, client: TestClie
     assert captured["tenant_id"] == "herve"
     assert captured["character"].character_id == "luciana"
     assert payload["character_id"] == "luciana"
+

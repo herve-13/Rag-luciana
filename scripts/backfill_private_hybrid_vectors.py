@@ -8,11 +8,11 @@ import asyncio
 
 from sqlalchemy import select
 
-from rag_luciana.clients import qdrant_client as qc
-from rag_luciana.core.embeddings import embed_text
-from rag_luciana.core.sparse_embeddings import embed_sparse_text
-from rag_luciana.db.models import Chunk
-from rag_luciana.db.session import async_session_factory
+from chatfriends_retrieval.clients import qdrant_client as qc
+from chatfriends_retrieval.core.embeddings import embed_text
+from chatfriends_retrieval.core.sparse_embeddings import embed_sparse_text
+from chatfriends_retrieval.db.models import Chunk
+from chatfriends_retrieval.db.session import async_session_factory
 
 
 async def run(*, character_id: str | None, user_id: str | None, batch_size: int, recreate: bool) -> None:
@@ -105,3 +105,4 @@ if __name__ == "__main__":
             recreate=bool(args.recreate),
         )
     )
+

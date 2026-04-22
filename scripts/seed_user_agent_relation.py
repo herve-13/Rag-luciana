@@ -5,7 +5,7 @@ Reads:
 - BACKEND_LUCIANA/data/users/{user_id}/profile.json
 - BACKEND_LUCIANA/data/ai_profiles/{agent_id}/profile.json
 
-Writes directly to rag-luciana DB tables via repository functions.
+Writes directly to chatfriends_retrieval_service DB tables via repository functions.
 """
 
 from __future__ import annotations
@@ -17,8 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from rag_luciana.db import repo
-from rag_luciana.db.session import async_session_factory, engine
+from chatfriends_retrieval.db import repo
+from chatfriends_retrieval.db.session import async_session_factory, engine
 
 
 def _default_paths(user_id: str, agent_id: str) -> tuple[Path, Path]:
@@ -213,3 +213,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+

@@ -8,8 +8,8 @@ import asyncio
 import json
 from typing import Any
 
-from rag_luciana.db import repo
-from rag_luciana.db.session import async_session_factory, engine
+from chatfriends_retrieval.db import repo
+from chatfriends_retrieval.db.session import async_session_factory, engine
 
 
 async def fetch(*, user_id: str, agent_id: str) -> dict[str, Any]:
@@ -80,4 +80,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 

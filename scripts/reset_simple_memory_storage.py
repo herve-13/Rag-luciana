@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 from __future__ import annotations
 
 import argparse
@@ -18,8 +18,8 @@ async def _run(character_id: str | None) -> int:
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
 
-    from rag_luciana.clients.qdrant_client import collection_name, get_qdrant_client
-    from rag_luciana.db.session import async_session_factory
+    from chatfriends_retrieval.clients.qdrant_client import collection_name, get_qdrant_client
+    from chatfriends_retrieval.db.session import async_session_factory
 
     async with async_session_factory() as db:
         result_chunks = await db.execute(text("SELECT COUNT(*) FROM chunks"))
@@ -51,7 +51,7 @@ async def _run(character_id: str | None) -> int:
 
 
 def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(description="Reset simple memory storage in rag-luciana")
+    parser = argparse.ArgumentParser(description="Reset simple memory storage in chatfriends_retrieval_service")
     parser.add_argument("--character-id", default=None, help="Optional character_id to target in Qdrant")
     args = parser.parse_args(argv)
     return asyncio.run(_run(args.character_id))
@@ -59,3 +59,5 @@ def main(argv: list[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
+
+

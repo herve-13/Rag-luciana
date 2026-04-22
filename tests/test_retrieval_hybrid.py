@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from rag_luciana.core import retrieval as r
-from rag_luciana.core.sparse_embeddings import SparseEmbedding
+from chatfriends_retrieval.core import retrieval as r
+from chatfriends_retrieval.core.sparse_embeddings import SparseEmbedding
 
 
 class _Point:
@@ -42,7 +42,7 @@ async def test_retrieve_private_hybrid_rrf(monkeypatch):
             {
                 "chunk_id": "c1",
                 "doc_id": "d1",
-                "character_id": "luciana",
+                "assistant_id": "luciana",
                 "user_id": "u1",
                 "text": "j'aime le football",
                 "sparse_terms": ["football"],
@@ -53,7 +53,7 @@ async def test_retrieve_private_hybrid_rrf(monkeypatch):
             {
                 "chunk_id": "c2",
                 "doc_id": "d2",
-                "character_id": "luciana",
+                "assistant_id": "luciana",
                 "user_id": "u1",
                 "text": "j'aime les pommes",
                 "sparse_terms": ["pommes"],
@@ -66,7 +66,7 @@ async def test_retrieve_private_hybrid_rrf(monkeypatch):
             {
                 "chunk_id": "c1",
                 "doc_id": "d1",
-                "character_id": "luciana",
+                "assistant_id": "luciana",
                 "user_id": "u1",
                 "text": "j'aime le football",
                 "sparse_terms": ["football"],
@@ -79,7 +79,7 @@ async def test_retrieve_private_hybrid_rrf(monkeypatch):
 
     debug: dict = {}
     hits = await r.retrieve(
-        character_id="luciana",
+        assistant_id="luciana",
         query="quels sports j'aime ?",
         scope="private",
         user_id="u1",
@@ -128,7 +128,7 @@ async def test_retrieve_disables_sparse_without_terms(monkeypatch):
 
     debug: dict = {}
     hits = await r.retrieve(
-        character_id="luciana",
+        assistant_id="luciana",
         query="x",
         scope="private",
         user_id="u1",
@@ -160,7 +160,7 @@ async def test_retrieve_dense_display_score(monkeypatch):
                 {
                     "chunk_id": "c1",
                     "doc_id": "d1",
-                    "character_id": "luciana",
+                    "assistant_id": "luciana",
                     "user_id": "u1",
                     "text": "memoire dense",
                 },
@@ -169,7 +169,7 @@ async def test_retrieve_dense_display_score(monkeypatch):
     )
 
     hits = await r.retrieve(
-        character_id="luciana",
+        assistant_id="luciana",
         query="memoire",
         scope="private",
         user_id="u1",
@@ -213,7 +213,7 @@ async def test_retrieve_rerank_keeps_display_score_from_hybrid_base(monkeypatch)
             {
                 "chunk_id": "c1",
                 "doc_id": "d1",
-                "character_id": "luciana",
+                "assistant_id": "luciana",
                 "user_id": "u1",
                 "text": "Luciana a travaille comme mannequin.",
             },
@@ -223,7 +223,7 @@ async def test_retrieve_rerank_keeps_display_score_from_hybrid_base(monkeypatch)
             {
                 "chunk_id": "c2",
                 "doc_id": "d2",
-                "character_id": "luciana",
+                "assistant_id": "luciana",
                 "user_id": "u1",
                 "text": "Luciana aime la mode.",
             },
@@ -235,7 +235,7 @@ async def test_retrieve_rerank_keeps_display_score_from_hybrid_base(monkeypatch)
             {
                 "chunk_id": "c1",
                 "doc_id": "d1",
-                "character_id": "luciana",
+                "assistant_id": "luciana",
                 "user_id": "u1",
                 "text": "Luciana a travaille comme mannequin.",
                 "sparse_terms": ["travail", "mannequin"],
@@ -248,7 +248,7 @@ async def test_retrieve_rerank_keeps_display_score_from_hybrid_base(monkeypatch)
 
     debug: dict = {}
     hits = await r.retrieve(
-        character_id="luciana",
+        assistant_id="luciana",
         query="quel est ton travail ?",
         scope="private",
         user_id="u1",
@@ -273,8 +273,9 @@ async def test_retrieve_rerank_keeps_display_score_from_hybrid_base(monkeypatch)
 async def test_retrieve_rejects_non_private_scope():
     with pytest.raises(ValueError):
         await r.retrieve(
-            character_id="luciana",
+            assistant_id="luciana",
             query="x",
             scope="global",
             user_id="u1",
         )
+

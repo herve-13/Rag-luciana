@@ -9,8 +9,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from rag_luciana.db import repo
-from rag_luciana.db.session import async_session_factory, engine
+from chatfriends_retrieval.db import repo
+from chatfriends_retrieval.db.session import async_session_factory, engine
 
 
 def _default_profiles_root() -> Path:
@@ -111,7 +111,7 @@ async def seed_all(*, profiles_root: Path) -> dict[str, Any]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Seed all AI profiles into rag-luciana MariaDB characters table"
+        description="Seed all AI profiles into chatfriends_retrieval_service MariaDB characters table"
     )
     parser.add_argument("--profiles-root", help="Path to BACKEND_LUCIANA/data/ai_profiles")
     args = parser.parse_args()
@@ -130,4 +130,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
 

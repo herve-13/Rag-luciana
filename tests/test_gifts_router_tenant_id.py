@@ -6,9 +6,9 @@ from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from rag_luciana.api import gifts_router as gifts_module
-from rag_luciana.api.deps import _get_db
-from rag_luciana.api.gifts_router import router as gifts_router
+from chatfriends_retrieval.api import gifts_router as gifts_module
+from chatfriends_retrieval.api.deps import _get_db
+from chatfriends_retrieval.api.gifts_router import router as gifts_router
 
 
 def _now() -> datetime:
@@ -98,3 +98,4 @@ def test_gift_history_returns_row_tenant_id(monkeypatch):
     payload = response.json()
     assert captured["tenant_id"] == "tenant_ops"
     assert payload[0]["tenant_id"] == "tenant_ops"
+

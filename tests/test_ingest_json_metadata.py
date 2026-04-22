@@ -1,8 +1,8 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import pytest
 
-from rag_luciana.ingest import ingest_json
+from chatfriends_retrieval.ingest import ingest_json
 
 
 @pytest.mark.asyncio
@@ -110,3 +110,4 @@ async def test_ingest_json_document_simple_records_keep_simple_metadata(monkeypa
     assert captured["payloads"][0]["canonical"] is True
     assert captured["payloads"][0]["source"] == "seed"
     assert captured["repo_meta_json"][0]["bucket"] == "persona"
+

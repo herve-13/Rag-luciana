@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from rag_luciana.api import query_router
-from rag_luciana.api.schemas import QueryFilters, QueryRequest
+from chatfriends_retrieval.api import query_router
+from chatfriends_retrieval.api.schemas import QueryFilters, QueryRequest
 
 
 @pytest.mark.asyncio
@@ -156,3 +156,4 @@ async def test_query_router_returns_display_score_fields(monkeypatch):
     assert resp.results[0].score_source == "hybrid_rrf"
     assert resp.results[0].display_score == 84
     assert resp.results[0].display_band == "fort"
+

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from rag_luciana.clients import qdrant_client as qc
+from chatfriends_retrieval.clients import qdrant_client as qc
 
 
 class _Collections:
@@ -103,3 +103,4 @@ def test_collection_name_can_be_tenant_scoped(monkeypatch):
     name = qc.collection_name("npc_jean", "private", tenant_id="tenant_a")
 
     assert name == "rag_tenant_a_npc_jean_private"
+

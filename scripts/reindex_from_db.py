@@ -15,10 +15,10 @@ from collections.abc import Iterable
 
 from sqlalchemy import select
 
-from rag_luciana.clients import qdrant_client as qc
-from rag_luciana.core.embeddings import embed_text
-from rag_luciana.db.models import Chunk
-from rag_luciana.db.session import async_session_factory, engine
+from chatfriends_retrieval.clients import qdrant_client as qc
+from chatfriends_retrieval.core.embeddings import embed_text
+from chatfriends_retrieval.db.models import Chunk
+from chatfriends_retrieval.db.session import async_session_factory, engine
 
 
 def _source_uri(meta_json: dict | None) -> str | None:
@@ -174,3 +174,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
